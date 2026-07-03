@@ -43,13 +43,14 @@ Built by Caroline (product owner / QA) with Claude Code as builder.
 - [x] SLICE 6B: Special candies
 
 ## STATUS
-- Current slice: SLICE 6B (special candies) implemented locally, all checkpoints complete, not yet
-  committed/pushed — Caroline to review before it auto-deploys. This is the final v1 slice per the
-  slice plan; next step after this is Caroline's full L1-L10 replay (see Open Questions) and any
-  resulting star-threshold retune.
+- Current slice: SLICE 6B (special candies) complete, committed (`7b891e1`), and deployed. This was
+  the final v1 slice per the slice plan; next step is Caroline's full L1-L10 replay (see Open
+  Questions) and any resulting star-threshold retune, plus the Architect follow-up on the balance
+  pass numbers below.
 - Deployed URL: https://candygame-six.vercel.app (Vercel project `caroline-liem/candygame`, connected
-  to GitHub `carolineliem904-max/candy_game` on `main` — every push auto-deploys). The deployed site
-  still reflects pre-6B (SLICE 6A) behavior until this work is committed and pushed.
+  to GitHub `carolineliem904-max/candy_game` on `main` — every push auto-deploys). Confirmed live:
+  the production alias serves bundle `index-CeKtRyOd.js`, matching the local SLICE 6B build exactly,
+  and a headless-Chromium pass against the live URL loaded the level map with zero console errors.
 
 ## DECISIONS LOG
 - 2026-07-03: Stack locked (Phaser 3 + TS + Vite). Logic/render separation mandated.
@@ -420,6 +421,14 @@ Built by Caroline (product owner / QA) with Claude Code as builder.
   re-verified clean. All debug scaffolding (a temporary `window.__game` hook in `main.ts`, the
   scratch Playwright script) was removed before finishing — `git status` shows no stray files.
   No other deviations from spec.
+- 2026-07-04: Committed SLICE 6B (`7b891e1`, "Implement SLICE 6B: special candies (striped, wrapped,
+  color bomb)") and pushed to `main`, triggering the existing auto-deploy. Confirmed via `vercel ls`
+  that the resulting production deployment reached `Ready`, then confirmed the production alias
+  (candygame-six.vercel.app) serves the exact bundle hash (`index-CeKtRyOd.js`) produced by the local
+  build, and did a final headless-Chromium pass against the *live* URL (not just local) showing the
+  level map loads cleanly with zero console errors. Left `SLICE_7_SPEC.md` (present in the working
+  tree, not authored as part of this slice) out of the commit — untouched, for Caroline/Architect to
+  pick up separately.
 
 ## OPEN QUESTIONS
 - Final game name and candy theme (Caroline to decide — was previously gated on the SLICE 6B pass,
