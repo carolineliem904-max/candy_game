@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Board } from "../src/logic/Board";
 import { CandyType } from "../src/logic/CandyType";
 import { mulberry32 } from "../src/logic/rng";
-import { allNull, boardFromLayout, snapshot } from "./helpers";
+import { allNull, boardFromLayout, colorAt, colorSnapshot, snapshot } from "./helpers";
 
 const COLS = 8;
 const ROWS = 8;
@@ -31,7 +31,7 @@ describe("Board.applyGravity", () => {
     );
     expect(moves).toHaveLength(2);
 
-    const col0 = [0, 1, 2, 3, 4].map((row) => board.getCell(0, row));
+    const col0 = [0, 1, 2, 3, 4].map((row) => colorAt(board, 0, row));
     expect(col0).toEqual([null, R, O, Y, CandyType.GREEN]);
   });
 
@@ -46,7 +46,7 @@ describe("Board.applyGravity", () => {
 
     board.applyGravity();
 
-    const col0 = [0, 1, 2, 3, 4].map((row) => board.getCell(0, row));
+    const col0 = [0, 1, 2, 3, 4].map((row) => colorAt(board, 0, row));
     expect(col0).toEqual([null, null, null, R, O]);
   });
 
@@ -57,7 +57,7 @@ describe("Board.applyGravity", () => {
     const moves = board.applyGravity();
 
     expect(moves).toHaveLength(0);
-    const col0 = [0, 1, 2, 3, 4].map((row) => board.getCell(0, row));
+    const col0 = [0, 1, 2, 3, 4].map((row) => colorAt(board, 0, row));
     expect(col0).toEqual([null, null, null, null, null]);
   });
 
@@ -82,9 +82,9 @@ describe("Board.applyGravity", () => {
 
     board.applyGravity();
 
-    expect([0, 1, 2, 3].map((row) => board.getCell(0, row))).toEqual([null, R, O, Y]);
-    expect([0, 1, 2, 3].map((row) => board.getCell(1, row))).toEqual([null, R, O, Y]);
-    expect([0, 1, 2, 3].map((row) => board.getCell(2, row))).toEqual([R, O, Y, CandyType.GREEN]);
+    expect([0, 1, 2, 3].map((row) => colorAt(board, 0, row))).toEqual([null, R, O, Y]);
+    expect([0, 1, 2, 3].map((row) => colorAt(board, 1, row))).toEqual([null, R, O, Y]);
+    expect([0, 1, 2, 3].map((row) => colorAt(board, 2, row))).toEqual([R, O, Y, CandyType.GREEN]);
   });
 });
 
@@ -103,7 +103,7 @@ describe("Board.refill", () => {
     expect(grid.flat().every((cell) => cell !== null)).toBe(true);
     expect(spawns).toHaveLength(6 * 6 - 3);
     for (const spawn of spawns) {
-      expect(board.getCell(spawn.cell.col, spawn.cell.row)).toBe(spawn.type);
+      expect(colorAt(board, spawn.cell.col, spawn.cell.row)).toBe(spawn.type);
     }
   });
 });
@@ -166,7 +166,7 @@ describe("Board.resolve", () => {
     // Columns 1-5 (the inert filler) are never touched.
     for (let row = 0; row < 6; row++) {
       for (let col = 1; col < 6; col++) {
-        expect(board.getCell(col, row)).toBe((col + row) % 3);
+        expect(colorAt(board, col, row)).toBe((col + row) % 3);
       }
     }
 
@@ -213,13 +213,13 @@ describe("Board.reshuffle", () => {
     expect(board.findMatches()).toHaveLength(0);
     expect(board.hasAnyValidMove()).toBe(false);
 
-    const before = countByType(snapshot(board));
+    const before = countByType(colorSnapshot(board));
 
     board.reshuffle();
 
     expect(board.findMatches()).toHaveLength(0);
     expect(board.hasAnyValidMove()).toBe(true);
-    expect(countByType(snapshot(board))).toEqual(before);
+    expect(countByType(colorSnapshot(board))).toEqual(before);
   });
 });
 

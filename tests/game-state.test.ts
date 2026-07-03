@@ -3,7 +3,7 @@ import { GameState } from "../src/logic/GameState";
 import { CandyType } from "../src/logic/CandyType";
 import { BOARD_COLS, BOARD_ROWS } from "../src/logic/constants";
 import { scoreForSteps } from "../src/logic/ScoreRules";
-import { allNull, applyLayout, makeLevel, snapshot } from "./helpers";
+import { allNull, applyLayout, colorSnapshot, makeLevel } from "./helpers";
 
 const R = CandyType.RED;
 const O = CandyType.ORANGE;
@@ -161,7 +161,7 @@ describe("GameState with different LevelDefs", () => {
   it("generates a board using only the level's candyTypes count", () => {
     for (const seed of [1, 2, 3, 4, 5]) {
       const game = new GameState({ level: makeLevel({ candyTypes: 5 }), seed });
-      const grid = snapshot(game.board);
+      const grid = colorSnapshot(game.board);
       expect(grid.flat().every((cell) => cell === null || cell < 5)).toBe(true);
     }
   });

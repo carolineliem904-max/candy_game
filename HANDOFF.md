@@ -40,13 +40,16 @@ Built by Caroline (product owner / QA) with Claude Code as builder.
 - [x] SLICE 4: Score, move counter, win/lose screens
 - [x] SLICE 5: Animations (tweens), sound, polish
 - [x] SLICE 6A: Level system & progression (numbered levels, stars, localStorage)
-- [ ] SLICE 6B: Special candies
+- [x] SLICE 6B: Special candies
 
 ## STATUS
-- Current slice: SLICE 6A complete, deployed. Ready for SLICE 6B (special candies) once Caroline
-  playtests the L1-L10 difficulty curve.
+- Current slice: SLICE 6B (special candies) implemented locally, all checkpoints complete, not yet
+  committed/pushed — Caroline to review before it auto-deploys. This is the final v1 slice per the
+  slice plan; next step after this is Caroline's full L1-L10 replay (see Open Questions) and any
+  resulting star-threshold retune.
 - Deployed URL: https://candygame-six.vercel.app (Vercel project `caroline-liem/candygame`, connected
-  to GitHub `carolineliem904-max/candy_game` on `main` — every push auto-deploys)
+  to GitHub `carolineliem904-max/candy_game` on `main` — every push auto-deploys). The deployed site
+  still reflects pre-6B (SLICE 6A) behavior until this work is committed and pushed.
 
 ## DECISIONS LOG
 - 2026-07-03: Stack locked (Phaser 3 + TS + Vite). Logic/render separation mandated.
@@ -301,11 +304,144 @@ Built by Caroline (product owner / QA) with Claude Code as builder.
   no manual redeploy step needed. Verified the live URL loads with zero console errors via a
   headless-Chromium pass against the actual deployed site (not just the local build).
 
+- 2026-07-03: SLICE 6B implemented — all 4 checkpoints (data model/creation, activation/chains,
+  rendering/animation/sound, balance pass), tests green at each stage per spec.
+  **Data model**: `Board.ts`'s `GridCell` is now `Candy | null` where `Candy = {type: CandyType|null,
+  special: SpecialKind|null}` (`SpecialKind = 'stripedH'|'stripedV'|'wrapped'|'bomb'`) — `type: null`
+  is reserved for a color bomb (colorless, per spec), distinct from `GridCell = null` (EMPTY socket).
+  This was the exact shape the spec sketched in Checkpoint 1 ("builder may restructure GridCell;
+  document choice"). It's a breaking change to `Board.getCell()`'s return type, so every existing
+  test that compared `getCell()`/`snapshot()` output directly to a `CandyType` was updated to compare
+  `.type` instead (new `colorAt`/`colorSnapshot` helpers in `tests/helpers.ts`); `boardFromLayout`
+  keeps its old `(CandyType|null)[][]` input shape for backward compat (wraps each cell in
+  `{type, special: null}` internally) so almost no test *data* needed to change, just the assertions
+  that read cells back out. All 56 pre-SLICE-6B tests pass unmodified in spirit (56/56 → 73/73 with
+  new tests added).
+  **Creation** (`Board.computeSpecialCreations`): groups a step's color-matches into clusters via
+  union-find on shared cells (an L/T is a 2+-match cluster); per cluster, checks in priority order —
+  any match ≥5 cells → bomb; cluster has 2+ matches → wrapped at the shared/intersection cell; lone
+  4-run → striped — which naturally encodes the spec's "5-line > L/T > 4-run" priority without a
+  separate tie-break step. Spawn location is the moved cell if it's part of the match (player-swap
+  first step only), else the run's center index; cascade-created 4-runs (no swap context) use the
+  run's own orientation. One deliberate literal reading of a spec nuance, called out because it's
+  easy to assume the opposite: "vertical swap → vertical stripe, horizontal → horizontal" is
+  swap-*direction*-based, not run-orientation-based — a vertical swap that happens to complete a
+  *horizontal* 4-run still produces a vertical stripe. Covered explicitly in
+  `tests/board-specials-creation.test.ts`. The spawn cell is excluded from that step's `cleared` set
+  (it becomes the special in place, not nulled) via a `specialsCreated`/`spawnKeys` exclusion in the
+  new `Board.runCascadeStep`, which replaced the old standalone `clearMatches`.
+  **Activation & chains** (`Board.runCascadeStep`'s BFS): any pre-existing special caught in a color
+  match, or explicitly seeded (bomb/special swap), activates — computing its effect's cell set via
+  `effectCellsFor` (striped: full row/column; wrapped: 3x3 clipped to the board edge; bomb: every cell
+  of a target color, only when a target color is known) — and any *other* not-yet-activated special
+  whose cell falls inside that effect gets enqueued too, each activating at most once, all within the
+  same cascade step (same clear→gravity→refill pass), exactly matching "chain reactions REQUIRED".
+  **Bomb swap / special+special swap** (`Board.swap`): a swap where *both* cells are specials always
+  succeeds — both-bomb triggers a `forcedClearAll` (whole board), any other combo (including
+  bomb+non-bomb) seeds each side's activation with the *other* side's color as `targetColor` (ignored
+  by non-bomb specials, consumed by a bomb to pick its cleared color) — this one seeding rule
+  correctly produces every case in the spec's matrix (bomb+bomb, bomb+striped, bomb+wrapped,
+  striped+wrapped, etc.) without special-casing each pairing separately. A swap where exactly one
+  side is a bomb (and the other is a plain candy) takes the same seeded-activation path, always
+  succeeding without needing a color match. Caught and fixed a real bug here during testing: the
+  bomb's post-swap *position* is the cell it swapped *into* (`b` when it started at `a`), not where it
+  started — an early version used the pre-swap position and would have applied the bomb's clear at
+  the wrong cell.
+  **Scoring** (`ScoreRules.ts`): run-based scoring is unchanged; a step's cells cleared by an
+  activation effect but *not* already part of a color match this step score flat
+  `BASE_POINTS_PER_CANDY` (60, no run bonus) each; each special created adds a flat
+  `SPECIAL_CREATION_BONUS` (200); all three components are summed *before* applying that step's
+  cascade multiplier (builder decision: the spec says the multiplier "applies to special chain
+  reactions as normal steps" but doesn't say explicitly whether the flat +200 is included in that
+  multiplication — treating the whole step uniformly was the simplest, most consistent reading).
+  A cell that's both part of a match and swept by an effect this step is scored once, not twice
+  (dedup by cell key against the step's `matches`, not by whether an effect happened to also touch it).
+  One more documented simplification: a color bomb chain-activated by *being hit* (not swapped) has no
+  color context to draw on, so it just self-clears (pops) rather than picking some color — this can
+  only happen via chain (bombs never join a color-based match, since they're colorless), and it's
+  flagged here rather than silently assumed correct.
+  **Rendering/animation/sound** (`BoardScene.ts`, `SoundEngine.ts`): `candyObjects` is now
+  `Container[]`, not `Arc[]` — each candy is a small Container (`drawCandyVisual`) so specials can
+  layer decoration on the base circle: striped gets a white bar (H or V), wrapped gets a second gold
+  ring, a bomb is a dark circle with 5 small white dots, still all programmatic shapes (no image
+  assets, consistent with the rest of the project). `spawnClearBurst`'s particle color now reads from
+  `container.getData('color')` (stashed at draw time) instead of `Arc.fillColor`, since a Container has
+  no fill color of its own. Per-step playback order: activation effects (row/column flash sweep for
+  striped, expanding ring for wrapped, per-candy zaps staggered across the affected cells for a bomb,
+  capped at 400ms total stagger regardless of how many cells a bomb clears so a huge clear can't blow
+  the animation budget) play concurrently via `playActivations`, *then* the normal clear-pop, *then*
+  `playSpecialsCreated` swaps the spawn cell's visual from plain candy to special with a small
+  scale-pop flourish, *then* gravity/spawn as before. All of it inherits the existing
+  `CASCADE_COMPRESS_THRESHOLD` time-scaling for deep cascades, so the ~4s worst-case budget still
+  holds. Distinct sounds per special added to `SoundEngine` (`striped` whoosh via a new `playSweep`
+  frequency-ramp helper, `wrapped` low boom, `bomb` bigger boom + descending sweep, `specialCreated`
+  bright two-note sparkle) — reused the existing procedural Web Audio approach, no new asset files.
+  Input lock (`this.animating`) required no changes — it already wraps the whole `attemptSwap`
+  sequence regardless of how many activation/creation phases run inside it.
+  **Balance pass** (Checkpoint 4): wrote a throwaway comparison script (not committed — extracted the
+  pre-SLICE-6B `src/logic/` via `git show HEAD:...` into a temp dir, ran it side-by-side with the
+  current code) that plays 20 seeded playthroughs each on L4 and L8, always taking the board's own
+  `findAnyValidMove()` pick each turn as a simple, deterministic-per-seed stand-in for "random valid
+  moves," applied identically to old and new code so the *comparison* is fair even though it isn't a
+  uniform sample of all valid moves (a real player who deliberately hunts 4/5-runs, L/T shapes, and
+  swaps directly into existing specials to trigger chains would very likely see a bigger lift than
+  this naive baseline, since it never *seeks out* combos). Results: **L4: 360.0 → 413.5 pts/move
+  (+14.9%)**, **L8: 356.7 → 438.5 pts/move (+22.9%)** — both positive but below the spec's rough
+  +30-60% target. Tried the one authorized self-tuning knob (`SPECIAL_CREATION_BONUS`) at 300 and 400
+  (vs. the spec's suggested 200): even doubling it to 400 only reached L4 +20.0% / L8 +29.7%, with
+  visibly diminishing returns, because most of a special's *potential* value is in its activation
+  effect (row/column/3x3/color clears), which this naive move-picker rarely chains into on purpose.
+  Reverted to the spec's original 200 rather than push the flat bonus to an unrealistic value chasing
+  a naive-play metric — **flagging this for the Architect** per the spec's explicit instruction
+  ("flag for Architect instead of self-tuning beyond the +200 knob") rather than self-tuning further.
+  **Testing**: 17 new tests across `tests/board-specials-creation.test.ts` (Checkpoint 1: striped H/V
+  via swap direction incl. the direction-overrides-run-orientation case, wrapped from an L/T, bomb
+  from a 5-run, the priority ordering, a cascade-created special with no swap context) and
+  `tests/board-specials-activation.test.ts` (Checkpoint 2: striped row clear, wrapped 3x3 with
+  board-edge clipping, a 3-special chain, bomb-swap color clear, bomb+bomb full-board clear,
+  non-bomb special+special "activate individually," a bomb making `hasAnyValidMove` true on an
+  otherwise-dead board, a 50-move seeded playthrough with specials forced in partway through that
+  never throws or leaves holes, and swap-sequence determinism including a bomb swap) plus 2 in
+  `score-rules.test.ts` for the new scoring components — 73/73 tests pass, `npm run build` succeeds,
+  grep confirms zero Phaser imports in `src/logic/`. Verified end-to-end in a real (non-headless-only)
+  Chromium session via Playwright, driving the actual `BoardScene.attemptSwap` method (not a
+  logic-only harness) with engineered board states for each special and the chain scenario,
+  screenshotting mid-animation and settled states for all of: striped row clear, wrapped 3x3
+  (visible ring, correctly clipped at a corner), the 3-special chain (row sweep + column sweep +
+  wrapped ring all visible firing together in one screenshot), a color-bomb swap, and a bomb+bomb
+  full-board clear (all 64 cells zapping, board fully refilled with no holes afterward); confirmed
+  zero console/page errors across every scenario; confirmed via 5 rapid real mouse clicks mid-animation
+  that input stays locked (exactly one move consumed, no extra state change) through a full
+  activation+chain sequence. One methodology note from this pass, not a product bug: two early
+  screenshot passes showed no visible change after a swap — turned out to be bugs in the *verification
+  harness* itself (a punctuation-level `type === null` check that conflated "EMPTY cell" with "bomb,
+  which is colorless," and forgetting that engineered high-scoring scenarios can legitimately blow
+  past a level's win target and lock further swaps) rather than product issues; fixed the harness and
+  re-verified clean. All debug scaffolding (a temporary `window.__game` hook in `main.ts`, the
+  scratch Playwright script) was removed before finishing — `git status` shows no stray files.
+  No other deviations from spec.
+
 ## OPEN QUESTIONS
-- Final game name and candy theme (Caroline to decide before the SLICE 6B art/specials pass)
+- Final game name and candy theme (Caroline to decide — was previously gated on the SLICE 6B pass,
+  which is now done; this is the last thing blocking a "real" art/branding pass for v1)
+- Per SLICE 6B's spec ("After Completion"): Caroline should replay L1-L10 for the real difficulty
+  verdict now that specials exist — star thresholds may need a final retune (expected, not
+  pre-tuned). This folds in the pre-existing curve-playtest question below.
 - Default level curve (L1-L10 in `src/logic/levels.ts`) still hasn't had a real human playthrough —
-  the L5-L10 flattening above was a judgment call from reasoning about the numbers, not from actual
-  play. Caroline should playtest the whole curve, especially L8's ~610/move pinch point.
+  the L5-L10 flattening was a judgment call from reasoning about the numbers, not from actual play.
+  Caroline should playtest the whole curve, especially L8's ~610/move pinch point, now with specials
+  in play (which are expected to ease that pinch point — see the balance pass finding below).
+- **Balance pass came in under target — flagged for Architect**: SLICE 6B's Checkpoint 4 measured
+  specials raising naive-play score/move by +14.9% (L4) and +22.9% (L8), against the spec's rough
+  +30-60% target. The one authorized self-tuning knob (`SPECIAL_CREATION_BONUS`) was tried at 300 and
+  400 (vs. shipped value 200) and only reached +20.0%/+29.7% at 400, with diminishing returns — kept
+  at 200 rather than push it further on a naive-play metric. The measurement methodology (always
+  taking the board's first available valid move, not deliberately hunting combos or chains) likely
+  understates real achievable lift; worth an Architect call on whether to: (a) accept this as
+  directionally fine given skilled play does much better, (b) adjust something structural (activation
+  scoring, run-length thresholds) beyond the +200 knob, or (c) re-measure with a smarter auto-player
+  before deciding anything needs to change.
 - No sound assets or persistence were added beyond `localStorage` for progress (procedural Web
   Audio tones only, mute state in-memory only) — matches spec exactly, but worth confirming the
-  placeholder tones feel "juicy enough" or whether a later slice should revisit them.
+  placeholder tones (now including 4 new special-candy tones from SLICE 6B) feel "juicy enough" or
+  whether a later slice should revisit them.

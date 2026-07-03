@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import type { Cell, CascadeStep, Move, Spawn } from "../logic/Board";
+import type { Candy, Cell, CascadeStep, Move, SpecialActivation, SpecialCreation, Spawn } from "../logic/Board";
 import { CandyType } from "../logic/CandyType";
 import { BOARD_COLS, BOARD_ROWS } from "../logic/constants";
 import { GameState } from "../logic/GameState";
@@ -19,6 +19,10 @@ const CANDY_COLORS: Record<CandyType, number> = {
   [CandyType.PURPLE]: 0x9b59b6,
 };
 
+const BOMB_COLOR = 0x1c1a24;
+const STRIPE_COLOR = 0xffffff;
+const WRAPPED_RING_COLOR = 0xffd700;
+
 const SELECTION_COLOR = 0xffffff;
 const EMPTY_SOCKET_COLOR = 0x13111d;
 const MOVES_URGENT_THRESHOLD = 5;
@@ -35,6 +39,9 @@ const SPAWN_MS_PER_ROW = 80;
 const SPAWN_MAX_DURATION = 400;
 const CASCADE_COMPRESS_THRESHOLD = 3;
 const HINT_IDLE_MS = 5000;
+const ACTIVATION_DURATION = 260;
+const BOMB_ZAP_TOTAL_MS = 400;
+const SPECIAL_CREATED_DURATION = 160;
 
 interface DragStart extends Cell {
   x: number;
@@ -47,7 +54,7 @@ export class BoardScene extends Phaser.Scene {
   private soundEngine = new SoundEngine();
   private offsetX = 0;
   private offsetY = 0;
-  private candyObjects: (Phaser.GameObjects.Arc | null)[][] = [];
+  private candyObjects: (Phaser.GameObjects.Container | null)[][] = [];
   private boardLayer!: Phaser.GameObjects.Container;
   private selected: Cell | null = null;
   private selectionRing: Phaser.GameObjects.Arc | null = null;
@@ -173,10 +180,10 @@ export class BoardScene extends Phaser.Scene {
     for (let row = 0; row < BOARD_ROWS; row++) {
       this.candyObjects[row] = [];
       for (let col = 0; col < BOARD_COLS; col++) {
-        const type = this.gameState.board.getCell(col, row);
+        const cell = this.gameState.board.getCell(col, row);
         const { x, y } = this.cellCenter(col, row);
 
-        if (type === null) {
+        if (cell === null) {
           const socketRadius = (CELL_SIZE - CELL_PADDING * 2) / 2 - 4;
           const socket = this.add.circle(x, y, socketRadius, EMPTY_SOCKET_COLOR).setStrokeStyle(2, 0x2b2640);
           this.boardLayer.add(socket);
@@ -184,12 +191,56 @@ export class BoardScene extends Phaser.Scene {
           continue;
         }
 
-        const radius = (CELL_SIZE - CELL_PADDING * 2) / 2;
-        const candy = this.add.circle(x, y, radius, CANDY_COLORS[type]).setStrokeStyle(2, 0x1e1a2e);
+        const candy = this.drawCandyVisual(x, y, cell);
         this.boardLayer.add(candy);
         this.candyObjects[row][col] = candy;
       }
     }
+  }
+
+  /** Builds a candy's visual as a Container so specials can layer distinct,
+   * still-programmatic decoration on top of the base circle: striped gets a
+   * stripe bar (oriented H/V), wrapped gets a second gold ring, a color bomb
+   * is a dark multi-dot circle instead of a colored one. The base circle's
+   * fill color is stashed via setData so callers (e.g. the clear-burst
+   * particles) don't need to know which special this is. */
+  private drawCandyVisual(x: number, y: number, cell: Candy): Phaser.GameObjects.Container {
+    const radius = (CELL_SIZE - CELL_PADDING * 2) / 2;
+    const color = cell.special === "bomb" ? BOMB_COLOR : CANDY_COLORS[cell.type as CandyType];
+
+    const container = this.add.container(x, y);
+    const base = this.add.circle(0, 0, radius, color).setStrokeStyle(2, 0x1e1a2e);
+    container.add(base);
+    container.setData("color", color);
+
+    switch (cell.special) {
+      case "stripedH":
+        container.add(this.add.rectangle(0, 0, radius * 1.7, 5, STRIPE_COLOR).setAlpha(0.9));
+        break;
+      case "stripedV":
+        container.add(this.add.rectangle(0, 0, 5, radius * 1.7, STRIPE_COLOR).setAlpha(0.9));
+        break;
+      case "wrapped":
+        container.add(this.add.circle(0, 0, radius + 3, 0x000000, 0).setStrokeStyle(3, WRAPPED_RING_COLOR));
+        break;
+      case "bomb": {
+        const dots = [
+          [-5, -5],
+          [5, -5],
+          [0, 0],
+          [-5, 5],
+          [5, 5],
+        ];
+        for (const [dx, dy] of dots) {
+          container.add(this.add.circle(dx, dy, 2.5, 0xffffff).setAlpha(0.85));
+        }
+        break;
+      }
+      default:
+        break;
+    }
+
+    return container;
   }
 
   private cellCenter(col: number, row: number): { x: number; y: number } {
@@ -361,21 +412,124 @@ export class BoardScene extends Phaser.Scene {
       const step = steps[i];
       const stepNumber = i + 1;
       const points = scoreForStep(step, stepNumber);
-      const { x, y } = this.centroidOf(step.cleared);
+      const centroidCells = step.cleared.length > 0 ? step.cleared : [{ col: BOARD_COLS / 2, row: BOARD_ROWS / 2 }];
+      const { x, y } = this.centroidOf(centroidCells);
       this.showPopupText(`+${points}`, x, y, 18);
       this.soundEngine.pop(stepNumber);
       this.spawnClearBurst(step.cleared);
 
+      if (step.activations.length > 0) {
+        await this.playActivations(step.activations, scale);
+      }
       await this.playClear(step.cleared, clearDuration);
+      await this.playSpecialsCreated(step.specialsCreated);
       await this.playGravity(step.moves, gravityPerRow, gravityMax);
       await this.playSpawns(step.spawns, spawnPerRow, spawnMax);
     }
   }
 
+  /** Plays each activated special's distinct effect animation + sound
+   * concurrently: a row/column flash sweep for striped, an expanding ring
+   * for wrapped, per-candy zaps staggered across the cleared set for a
+   * color bomb (total stagger time capped so a huge bomb clear can't blow
+   * the ~4s budget). */
+  private async playActivations(activations: SpecialActivation[], scale: number): Promise<void> {
+    await Promise.all(activations.map((activation) => this.playActivationEffect(activation, scale)));
+  }
+
+  private async playActivationEffect(activation: SpecialActivation, scale: number): Promise<void> {
+    const { x, y } = this.cellCenter(activation.cell.col, activation.cell.row);
+
+    if (activation.special === "stripedH" || activation.special === "stripedV") {
+      this.soundEngine.striped();
+      const horizontal = activation.special === "stripedH";
+      const boardPixelW = BOARD_COLS * CELL_SIZE;
+      const boardPixelH = BOARD_ROWS * CELL_SIZE;
+      const rect = this.add
+        .rectangle(
+          horizontal ? this.offsetX + boardPixelW / 2 : x,
+          horizontal ? y : this.offsetY + boardPixelH / 2,
+          horizontal ? boardPixelW : CELL_SIZE * 0.6,
+          horizontal ? CELL_SIZE * 0.6 : boardPixelH,
+          STRIPE_COLOR,
+        )
+        .setAlpha(0)
+        .setDepth(8);
+      this.boardLayer.add(rect);
+      await this.tweenAsync({ targets: rect, alpha: 0.55, duration: ACTIVATION_DURATION * 0.35 * scale, yoyo: true });
+      rect.destroy();
+      return;
+    }
+
+    if (activation.special === "wrapped") {
+      this.soundEngine.wrapped();
+      const ring = this.add.circle(x, y, CELL_SIZE * 0.3, 0x000000, 0).setStrokeStyle(4, WRAPPED_RING_COLOR).setDepth(8);
+      this.boardLayer.add(ring);
+      ring.setAlpha(1);
+      await this.tweenAsync({ targets: ring, scale: 2.2, alpha: 0, duration: ACTIVATION_DURATION * scale, ease: "Cubic.Out" });
+      ring.destroy();
+      return;
+    }
+
+    // bomb
+    this.soundEngine.bomb();
+    const cells = activation.cellsCleared;
+    const perCellDelay = cells.length > 0 ? Math.min(30, BOMB_ZAP_TOTAL_MS / cells.length) * scale : 0;
+    await Promise.all(
+      cells.map(
+        (cell, i) =>
+          new Promise<void>((resolve) => {
+            this.time.delayedCall(i * perCellDelay, () => {
+              const p = this.cellCenter(cell.col, cell.row);
+              const zap = this.add.circle(p.x, p.y, 6, 0xffffff).setAlpha(0.9).setDepth(8);
+              this.boardLayer.add(zap);
+              this.tweens.add({
+                targets: zap,
+                scale: 2,
+                alpha: 0,
+                duration: 180 * scale,
+                onComplete: () => {
+                  zap.destroy();
+                  resolve();
+                },
+              });
+            });
+          }),
+      ),
+    );
+  }
+
+  /** A newly-created special replaces the plain candy at its spawn cell
+   * (which was excluded from this step's `cleared` set) with a little
+   * pop-into-existence flourish. */
+  private async playSpecialsCreated(creations: SpecialCreation[]): Promise<void> {
+    if (creations.length === 0) {
+      return;
+    }
+    this.soundEngine.specialCreated();
+
+    await Promise.all(
+      creations.map((creation) => {
+        const old = this.candyObjects[creation.cell.row]?.[creation.cell.col];
+        old?.destroy();
+
+        const { x, y } = this.cellCenter(creation.cell.col, creation.cell.row);
+        const visual = this.drawCandyVisual(x, y, { type: creation.type, special: creation.special });
+        this.boardLayer.add(visual);
+        this.candyObjects[creation.cell.row][creation.cell.col] = visual;
+        visual.setScale(0.3);
+
+        return this.tweenAsync({ targets: visual, scale: 1.15, duration: SPECIAL_CREATED_DURATION, ease: "Back.Out" }).then(
+          () => this.tweenAsync({ targets: visual, scale: 1, duration: SPECIAL_CREATED_DURATION * 0.6 }),
+        );
+      }),
+    );
+  }
+
   private async playClear(cells: Cell[], duration: number): Promise<void> {
     const objs = cells
       .map((cell) => this.candyObjects[cell.row]?.[cell.col])
-      .filter((obj): obj is Phaser.GameObjects.Arc => obj !== null && obj !== undefined);
+      .filter((obj): obj is Phaser.GameObjects.Container => obj !== null && obj !== undefined);
 
     await Promise.all(
       objs.map((obj) =>
@@ -425,9 +579,9 @@ export class BoardScene extends Phaser.Scene {
       const holeCount = columnSpawns.length;
       for (const spawn of columnSpawns) {
         const { x, y } = this.cellCenter(spawn.cell.col, spawn.cell.row);
-        const radius = (CELL_SIZE - CELL_PADDING * 2) / 2;
         const startY = this.offsetY - CELL_SIZE * (holeCount - spawn.cell.row);
-        const obj = this.add.circle(x, startY, radius, CANDY_COLORS[spawn.type]).setStrokeStyle(2, 0x1e1a2e);
+        // Refill always spawns plain (non-special) candies, per spec.
+        const obj = this.drawCandyVisual(x, startY, { type: spawn.type, special: null });
         this.boardLayer.add(obj);
         this.candyObjects[spawn.cell.row][spawn.cell.col] = obj;
 
@@ -454,8 +608,9 @@ export class BoardScene extends Phaser.Scene {
         continue;
       }
       const { x, y } = this.cellCenter(cell.col, cell.row);
+      const color = (obj.getData("color") as number | undefined) ?? 0xffffff;
       for (const { dx, dy } of directions) {
-        const particle = this.add.circle(x, y, 4, obj.fillColor).setDepth(9);
+        const particle = this.add.circle(x, y, 4, color).setDepth(9);
         this.boardLayer.add(particle);
         this.tweens.add({
           targets: particle,

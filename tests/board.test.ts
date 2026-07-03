@@ -49,7 +49,7 @@ describe("Board", () => {
 
     for (let row = 0; row < ROWS; row++) {
       for (let col = 0; col < COLS; col++) {
-        expect(boardA.getCell(col, row)).toBe(boardB.getCell(col, row));
+        expect(boardA.getCell(col, row)).toEqual(boardB.getCell(col, row));
       }
     }
   });
