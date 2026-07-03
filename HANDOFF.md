@@ -43,10 +43,10 @@ Built by Caroline (product owner / QA) with Claude Code as builder.
 - [ ] SLICE 6B: Special candies
 
 ## STATUS
-- Current slice: SLICE 6A complete. Vercel deploy from SLICE 5's prerequisite is still outstanding
-  (noted, not blocking — see Open Questions). Ready for SLICE 6B (special candies) once Caroline
+- Current slice: SLICE 6A complete, deployed. Ready for SLICE 6B (special candies) once Caroline
   playtests the L1-L10 difficulty curve.
-- Deployed URL: none yet
+- Deployed URL: https://candygame-six.vercel.app (Vercel project `caroline-liem/candygame`, connected
+  to GitHub `carolineliem904-max/candy_game` on `main` — every push auto-deploys)
 
 ## DECISIONS LOG
 - 2026-07-03: Stack locked (Phaser 3 + TS + Vite). Logic/render separation mandated.
@@ -285,14 +285,27 @@ Built by Caroline (product owner / QA) with Claude Code as builder.
   actually active at the time. Confirmed clean with the correct (currently-active) scene reference,
   and confirmed via `children.list.length` that no scene's display list leaks objects across
   restarts. No other deviations from spec.
+- 2026-07-03: Flattened the L5-L10 curve per Caroline's playtest read on the original (which
+  escalated ~1200/level and dipped to 14 moves at L8): now 6800/7600/8400/9200/10000/11000, all at
+  15 moves — no move-budget dip, since move pressure isn't wanted yet with SLICE 6B's specials
+  still ahead (L8 at ~9200/15 ≈ 610/move is meant to land as hard-but-humanly-possible
+  pre-specials, and ease once specials arrive). All target values still multiply out to exact
+  integers at both the ×1.3 and ×1.6 star thresholds, so no float-boundary risk. The star-threshold
+  tests in `game-progress.test.ts` iterate `LEVELS` directly rather than hardcoding old values, so
+  they validated the new curve with no test changes needed. 56/56 tests pass; build succeeds.
+- 2026-07-03: Deployed to Vercel, closing out the outstanding prerequisite flagged above. Initialized
+  git (this project had none before), pushed to the GitHub repo Caroline had already created
+  (`carolineliem904-max/candy_game`, `main` branch), then used the Vercel CLI (`vercel link` /
+  `vercel --prod`) — it auto-detected the Vite project, created the `caroline-liem/candygame`
+  project, and auto-connected the GitHub repo, so every future push to `main` will auto-deploy with
+  no manual redeploy step needed. Verified the live URL loads with zero console errors via a
+  headless-Chromium pass against the actual deployed site (not just the local build).
 
 ## OPEN QUESTIONS
 - Final game name and candy theme (Caroline to decide before the SLICE 6B art/specials pass)
-- Default level curve (L1-L10 in `src/logic/levels.ts`) hasn't had a real human playthrough yet —
-  Caroline should playtest the whole curve, not just the L4 config already tuned in SLICE 4.
+- Default level curve (L1-L10 in `src/logic/levels.ts`) still hasn't had a real human playthrough —
+  the L5-L10 flattening above was a judgment call from reasoning about the numbers, not from actual
+  play. Caroline should playtest the whole curve, especially L8's ~610/move pinch point.
 - No sound assets or persistence were added beyond `localStorage` for progress (procedural Web
   Audio tones only, mute state in-memory only) — matches spec exactly, but worth confirming the
   placeholder tones feel "juicy enough" or whether a later slice should revisit them.
-- SLICE 6A's spec prerequisite ("Vercel deploy live") was not actually met before this slice was
-  implemented — Caroline asked to proceed with 6A directly. Still worth doing the Vercel deploy
-  Caroline was asked about after SLICE 5, now covering both slices' work at once.
