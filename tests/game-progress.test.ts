@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { completeLevel, createInitialProgress, starsForScore } from "../src/logic/GameProgress";
+import {
+  completeLevel,
+  createInitialProgress,
+  starsForLevel,
+  starsForMovesRemaining,
+  starsForScore,
+} from "../src/logic/GameProgress";
 import { getLevelById, LEVELS } from "../src/logic/levels";
 import { makeLevel } from "./helpers";
 
@@ -30,12 +36,40 @@ describe("starsForScore", () => {
   });
 });
 
+describe("starsForMovesRemaining", () => {
+  it("gives exact boundary thresholds: 0 -> 1, 1-3 -> 2, 4+ -> 3", () => {
+    expect(starsForMovesRemaining(0)).toBe(1);
+    expect(starsForMovesRemaining(1)).toBe(2);
+    expect(starsForMovesRemaining(3)).toBe(2);
+    expect(starsForMovesRemaining(4)).toBe(3);
+    expect(starsForMovesRemaining(15)).toBe(3);
+  });
+});
+
+describe("starsForLevel", () => {
+  it("uses the score formula for a 'score' goal level, ignoring movesRemaining", () => {
+    const level = makeLevel({ targetScore: 1000, goal: { kind: "score" } });
+    expect(starsForLevel(level, 1000, 0)).toBe(1);
+    expect(starsForLevel(level, 1600, 0)).toBe(3);
+  });
+
+  it("uses the moves-remaining formula for a 'collect' or 'jelly' goal level, ignoring score", () => {
+    const collectLevel = makeLevel({ goal: { kind: "collect", pieces: {} } });
+    expect(starsForLevel(collectLevel, 0, 0)).toBe(1);
+    expect(starsForLevel(collectLevel, 0, 2)).toBe(2);
+    expect(starsForLevel(collectLevel, 0, 4)).toBe(3);
+
+    const jellyLevel = makeLevel({ goal: { kind: "jelly", jellyCells: [] } });
+    expect(starsForLevel(jellyLevel, 0, 4)).toBe(3);
+  });
+});
+
 describe("completeLevel", () => {
   it("unlocks the next level once any stars are earned", () => {
     const level1 = getLevelById(1)!;
     const progress = createInitialProgress();
 
-    const next = completeLevel(progress, 1, level1.targetScore);
+    const next = completeLevel(progress, 1, level1.targetScore, 5);
 
     expect(next.highestUnlocked).toBe(2);
     expect(next.stars[1]).toBe(1);
@@ -45,7 +79,7 @@ describe("completeLevel", () => {
     const level1 = getLevelById(1)!;
     const progress = createInitialProgress();
 
-    const next = completeLevel(progress, 1, level1.targetScore - 1);
+    const next = completeLevel(progress, 1, level1.targetScore - 1, 5);
 
     expect(next.highestUnlocked).toBe(1);
     expect(next.stars[1]).toBeUndefined();
@@ -55,10 +89,10 @@ describe("completeLevel", () => {
     const level1 = getLevelById(1)!;
     let progress = createInitialProgress();
 
-    progress = completeLevel(progress, 1, Math.round(level1.targetScore * 1.6)); // 3 stars
+    progress = completeLevel(progress, 1, Math.round(level1.targetScore * 1.6), 5); // 3 stars
     expect(progress.stars[1]).toBe(3);
 
-    progress = completeLevel(progress, 1, level1.targetScore); // replay with only 1 star
+    progress = completeLevel(progress, 1, level1.targetScore, 5); // replay with only 1 star
     expect(progress.stars[1]).toBe(3);
   });
 
@@ -66,21 +100,21 @@ describe("completeLevel", () => {
     const level1 = getLevelById(1)!;
     let progress = createInitialProgress();
 
-    progress = completeLevel(progress, 1, level1.targetScore); // 1 star
+    progress = completeLevel(progress, 1, level1.targetScore, 5); // 1 star
     expect(progress.stars[1]).toBe(1);
 
-    progress = completeLevel(progress, 1, Math.round(level1.targetScore * 1.6)); // 3 stars
+    progress = completeLevel(progress, 1, Math.round(level1.targetScore * 1.6), 5); // 3 stars
     expect(progress.stars[1]).toBe(3);
   });
 
   it("never re-locks: a losing replay of an already-unlocked frontier keeps highestUnlocked", () => {
     const level1 = getLevelById(1)!;
     let progress = createInitialProgress();
-    progress = completeLevel(progress, 1, level1.targetScore); // unlocks level 2
+    progress = completeLevel(progress, 1, level1.targetScore, 5); // unlocks level 2
     expect(progress.highestUnlocked).toBe(2);
 
     // Replaying level 1 and failing to reach target this time.
-    progress = completeLevel(progress, 1, 0);
+    progress = completeLevel(progress, 1, 0, 5);
 
     expect(progress.highestUnlocked).toBe(2);
     expect(progress.stars[1]).toBe(1);
@@ -91,14 +125,33 @@ describe("completeLevel", () => {
     let progress = createInitialProgress();
     progress = { ...progress, highestUnlocked: 5 };
 
-    progress = completeLevel(progress, 2, level2.targetScore);
+    progress = completeLevel(progress, 2, level2.targetScore, 5);
 
     expect(progress.highestUnlocked).toBe(5);
   });
 
   it("returns the same progress unchanged for an unknown level id", () => {
     const progress = createInitialProgress();
-    const next = completeLevel(progress, 9999, 1_000_000);
+    const next = completeLevel(progress, 9999, 1_000_000, 5);
     expect(next).toEqual(progress);
+  });
+
+  it("uses moves-remaining stars (not score) for a real collect-goal level", () => {
+    const collectLevel = LEVELS.find((l) => l.goal.kind === "collect")!;
+    const progress = createInitialProgress();
+
+    const zeroLeft = completeLevel(progress, collectLevel.id, 0, 0);
+    expect(zeroLeft.stars[collectLevel.id]).toBe(1);
+
+    const fourLeft = completeLevel(progress, collectLevel.id, 0, 4);
+    expect(fourLeft.stars[collectLevel.id]).toBe(3);
+  });
+
+  it("uses moves-remaining stars (not score) for a real jelly-goal level", () => {
+    const jellyLevel = LEVELS.find((l) => l.goal.kind === "jelly")!;
+    const progress = createInitialProgress();
+
+    const twoLeft = completeLevel(progress, jellyLevel.id, 0, 2);
+    expect(twoLeft.stars[jellyLevel.id]).toBe(2);
   });
 });

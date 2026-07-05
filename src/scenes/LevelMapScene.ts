@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { createInitialProgress, type GameProgress } from "../logic/GameProgress";
 import { LEVELS } from "../logic/levels";
+import type { LevelDef } from "../logic/LevelDef";
 import { loadProgress } from "../storage/progressStorage";
 import { THEME } from "./theme";
 import { drawSkyBackground } from "./background";
@@ -14,13 +15,21 @@ const TIRE_COLOR = 0x2b2f36;
 const LOCKED_COLOR = 0xc9c2b3;
 const UNLOCKED_COLOR = THEME.accent.primary;
 const COMPLETED_COLOR = THEME.accent.secondary;
+/** Minimum pointer movement (px) before a gesture counts as a scroll drag
+ * rather than a node tap — mirrors BoardScene's DRAG_THRESHOLD pattern. */
+const SCROLL_DRAG_THRESHOLD = 6;
 
 /** The always-reachable start screen: a winding path of level nodes, each
  * drawn as a little wheel (dark tire ring + colored hub) instead of a plain
  * circle. Locked levels are grayed with a lock icon; unlocked ones are
- * tappable and show stars once completed. */
+ * tappable and show stars once completed. 20 levels no longer fit the
+ * canvas in one screen (SLICE 8's level expansion), so the whole path
+ * scrolls vertically via camera drag — see setupDragScroll(). */
 export class LevelMapScene extends Phaser.Scene {
   private progress!: GameProgress;
+  private dragStartPointerY = 0;
+  private dragStartScrollY = 0;
+  private dragMoved = false;
 
   constructor() {
     super("LevelMapScene");
@@ -28,10 +37,23 @@ export class LevelMapScene extends Phaser.Scene {
 
   create(): void {
     this.progress = loadProgress() ?? createInitialProgress();
+    this.dragMoved = false;
 
     const centerX = this.scale.width / 2;
 
-    drawSkyBackground(this, this.scale.width, this.scale.height);
+    const positions = LEVELS.map((level, index) => ({
+      level,
+      x: centerX + (index % 2 === 0 ? -ZIGZAG_OFFSET : ZIGZAG_OFFSET),
+      y: TOP_MARGIN + index * NODE_SPACING,
+    }));
+    const lastY = positions[positions.length - 1].y;
+    const mascotY = lastY + 62;
+    // The whole scene (background included) is drawn at full content height
+    // and scrolls together as one piece — simpler and more thematic (a long
+    // winding road) than pinning a fixed header/background layer.
+    const contentHeight = Math.max(mascotY + 50, this.scale.height);
+
+    drawSkyBackground(this, this.scale.width, contentHeight);
 
     this.add
       .text(centerX, 24, "Select Level", {
@@ -41,12 +63,6 @@ export class LevelMapScene extends Phaser.Scene {
         fontStyle: "bold",
       })
       .setOrigin(0.5);
-
-    const positions = LEVELS.map((level, index) => ({
-      level,
-      x: centerX + (index % 2 === 0 ? -ZIGZAG_OFFSET : ZIGZAG_OFFSET),
-      y: TOP_MARGIN + index * NODE_SPACING,
-    }));
 
     const path = this.add.graphics();
     path.lineStyle(4, PATH_COLOR, 0.9);
@@ -58,10 +74,55 @@ export class LevelMapScene extends Phaser.Scene {
     }
 
     for (const { level, x, y } of positions) {
-      this.drawNode(level.id, x, y);
+      this.drawNode(level, x, y);
     }
 
-    this.drawMascotBubble(centerX, positions[positions.length - 1].y);
+    this.drawMascotBubble(centerX, lastY);
+
+    this.cameras.main.setBounds(0, 0, this.scale.width, contentHeight);
+    this.setupDragScroll(contentHeight);
+    this.scrollToFrontier(contentHeight);
+  }
+
+  /** Lets the player drag the map vertically when 20 levels don't fit one
+   * screen. Tracks whether the gesture actually moved (past a small
+   * threshold) so drawNode's tap handlers can ignore a drag that happens to
+   * end on top of a node, rather than spuriously navigating. */
+  private setupDragScroll(contentHeight: number): void {
+    const maxScroll = Math.max(0, contentHeight - this.scale.height);
+    if (maxScroll <= 0) {
+      return;
+    }
+
+    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      this.dragStartPointerY = pointer.y;
+      this.dragStartScrollY = this.cameras.main.scrollY;
+      this.dragMoved = false;
+    });
+
+    this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+      if (!pointer.isDown) {
+        return;
+      }
+      const dy = pointer.y - this.dragStartPointerY;
+      if (Math.abs(dy) > SCROLL_DRAG_THRESHOLD) {
+        this.dragMoved = true;
+      }
+      this.cameras.main.scrollY = Phaser.Math.Clamp(this.dragStartScrollY - dy, 0, maxScroll);
+    });
+  }
+
+  /** Auto-scrolls so the highest-unlocked level starts roughly centered,
+   * so a returning player doesn't have to scroll down from the top every
+   * time to find where they left off. */
+  private scrollToFrontier(contentHeight: number): void {
+    const maxScroll = Math.max(0, contentHeight - this.scale.height);
+    if (maxScroll <= 0) {
+      return;
+    }
+    const index = Math.min(this.progress.highestUnlocked, LEVELS.length) - 1;
+    const y = TOP_MARGIN + index * NODE_SPACING;
+    this.cameras.main.scrollY = Phaser.Math.Clamp(y - this.scale.height / 2, 0, maxScroll);
   }
 
   /** Small charm, visual only: a mascot + speech bubble in the footer strip
@@ -108,7 +169,8 @@ export class LevelMapScene extends Phaser.Scene {
       .setOrigin(0.5);
   }
 
-  private drawNode(levelId: number, x: number, y: number): void {
+  private drawNode(level: LevelDef, x: number, y: number): void {
+    const levelId = level.id;
     const unlocked = levelId <= this.progress.highestUnlocked;
     const stars = this.progress.stars[levelId] ?? 0;
 
@@ -129,6 +191,14 @@ export class LevelMapScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
+    // Small goal-kind badge (score/collect/jelly) in a white circle chip at
+    // the node's top-right corner, so the map previews level variety at a
+    // glance without opening each one.
+    const badgeX = x + NODE_RADIUS * 0.75;
+    const badgeY = y - NODE_RADIUS * 0.75;
+    this.add.circle(badgeX, badgeY, 9, 0xffffff, 0.95).setStrokeStyle(1.5, THEME.hud.chipStroke, 0.8);
+    this.add.text(badgeX, badgeY, THEME.goalBadge[level.goal.kind], { fontSize: "10px" }).setOrigin(0.5);
+
     if (unlocked && stars > 0) {
       const starChars = "★★★".slice(0, stars) + "☆☆☆".slice(0, 3 - stars);
       this.add
@@ -141,12 +211,14 @@ export class LevelMapScene extends Phaser.Scene {
     }
 
     if (unlocked) {
-      hub.setInteractive({ useHandCursor: true }).on("pointerup", () => {
+      const goToLevel = () => {
+        if (this.dragMoved) {
+          return;
+        }
         this.scene.start("BoardScene", { levelId });
-      });
-      tire.setInteractive({ useHandCursor: true }).on("pointerup", () => {
-        this.scene.start("BoardScene", { levelId });
-      });
+      };
+      hub.setInteractive({ useHandCursor: true }).on("pointerup", goToLevel);
+      tire.setInteractive({ useHandCursor: true }).on("pointerup", goToLevel);
     }
   }
 }

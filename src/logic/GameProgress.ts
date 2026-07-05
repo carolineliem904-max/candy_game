@@ -12,7 +12,8 @@ export function createInitialProgress(): GameProgress {
 
 /** Star thresholds: 1 = reached target, 2 = target*1.3, 3 = target*1.6.
  * Rounds each threshold so a future non-round target (Caroline will retune
- * these) can't miss an exact-boundary score to floating-point drift. */
+ * these) can't miss an exact-boundary score to floating-point drift. Only
+ * meaningful for "score" goal levels — see starsForLevel. */
 export function starsForScore(level: LevelDef, score: number): 0 | 1 | 2 | 3 {
   if (score >= Math.round(level.targetScore * 1.6)) {
     return 3;
@@ -26,16 +27,41 @@ export function starsForScore(level: LevelDef, score: number): 0 | 1 | 2 | 3 {
   return 0;
 }
 
+/** Stars for a non-score goal (collect/jelly), per spec: reward finishing
+ * with moves to spare rather than a score threshold. Only called on an
+ * actual win, so 0 stars never applies here. */
+export function starsForMovesRemaining(movesRemaining: number): 1 | 2 | 3 {
+  if (movesRemaining >= 4) {
+    return 3;
+  }
+  if (movesRemaining >= 1) {
+    return 2;
+  }
+  return 1;
+}
+
+/** Single entry point for "how many stars did this attempt earn" — picks
+ * the score-threshold or moves-remaining formula based on the level's goal
+ * kind, so callers never have to branch on goal kind themselves. */
+export function starsForLevel(level: LevelDef, score: number, movesRemaining: number): 0 | 1 | 2 | 3 {
+  return level.goal.kind === "score" ? starsForScore(level, score) : starsForMovesRemaining(movesRemaining);
+}
+
 /** Records a level attempt: unlocks the next level once any stars are
  * earned, and keeps the best stars ever earned for that level — a replay
  * that scores worse never downgrades stars or re-locks anything. */
-export function completeLevel(progress: GameProgress, levelId: number, score: number): GameProgress {
+export function completeLevel(
+  progress: GameProgress,
+  levelId: number,
+  score: number,
+  movesRemaining: number,
+): GameProgress {
   const level = getLevelById(levelId);
   if (!level) {
     return progress;
   }
 
-  const earned = starsForScore(level, score);
+  const earned = starsForLevel(level, score, movesRemaining);
   const existing = progress.stars[levelId] ?? 0;
   const stars = { ...progress.stars };
   if (earned > existing) {

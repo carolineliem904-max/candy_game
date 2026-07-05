@@ -56,11 +56,23 @@ export interface SpecialActivation {
   cellsCleared: Cell[];
 }
 
+/** A cleared cell's color at the moment it was cleared (before the grid slot
+ * is nulled), so goal tracking (e.g. collection goals) can tally by type
+ * without needing to re-derive it from post-clear state. `type` is null for
+ * a color bomb's own cell (colorless). */
+export interface ClearedCandy {
+  cell: Cell;
+  type: CandyType | null;
+}
+
 export interface CascadeStep {
   matches: Match[];
   activations: SpecialActivation[];
   specialsCreated: SpecialCreation[];
   cleared: Cell[];
+  clearedCandies: ClearedCandy[];
+  /** Cells in `cleared` that were carrying jelly, now removed by this step. */
+  jellyCleared: Cell[];
   moves: Move[];
   spawns: Spawn[];
 }
@@ -89,14 +101,43 @@ export class Board {
   private rng: RNG;
   private candyTypeCount: number;
   private grid: GridCell[][]; // grid[row][col]
+  /** Jelly overlay, keyed by (row, col) like `grid`. Independent of which
+   * candy currently occupies a cell — it does not move with gravity, per
+   * spec ("visual layer + win condition only"). */
+  private jelly: boolean[][];
 
-  constructor(cols: number, rows: number, rng: RNG, candyTypeCount: number = CANDY_TYPE_COUNT) {
+  constructor(
+    cols: number,
+    rows: number,
+    rng: RNG,
+    candyTypeCount: number = CANDY_TYPE_COUNT,
+    jellyCells: Cell[] = [],
+  ) {
     this.cols = cols;
     this.rows = rows;
     this.rng = rng;
     this.candyTypeCount = candyTypeCount;
     this.grid = [];
+    this.jelly = Array.from({ length: rows }, () => Array.from({ length: cols }, () => false));
+    for (const { col, row } of jellyCells) {
+      this.jelly[row][col] = true;
+    }
     this.generate();
+  }
+
+  hasJelly(col: number, row: number): boolean {
+    return this.jelly[row]?.[col] ?? false;
+  }
+
+  /** Count of cells still carrying jelly — 0 means the jelly goal is met. */
+  jellyRemaining(): number {
+    let count = 0;
+    for (let row = 0; row < this.rows; row++) {
+      for (let col = 0; col < this.cols; col++) {
+        if (this.jelly[row][col]) count++;
+      }
+    }
+    return count;
   }
 
   generate(): void {
@@ -421,6 +462,21 @@ export class Board {
     for (const key of spawnKeys) clearedMap.delete(key);
     const cleared = Array.from(clearedMap.values());
 
+    // Captured before nulling, so goal tracking knows what was actually
+    // cleared (matches, activation sweeps, and jelly removal all read off
+    // this same `cleared` list).
+    const clearedCandies: ClearedCandy[] = cleared.map((cell) => ({
+      cell,
+      type: this.getCell(cell.col, cell.row)?.type ?? null,
+    }));
+    const jellyCleared: Cell[] = [];
+    for (const cell of cleared) {
+      if (this.jelly[cell.row][cell.col]) {
+        this.jelly[cell.row][cell.col] = false;
+        jellyCleared.push(cell);
+      }
+    }
+
     for (const cell of cleared) {
       this.setCell(cell.col, cell.row, null);
     }
@@ -431,7 +487,7 @@ export class Board {
     const moves = this.applyGravity();
     const spawns = this.refill();
 
-    return { matches: params.matches, activations, specialsCreated, cleared, moves, spawns };
+    return { matches: params.matches, activations, specialsCreated, cleared, clearedCandies, jellyCleared, moves, spawns };
   }
 
   /** Returns the cells a special's effect clears (including its own cell).

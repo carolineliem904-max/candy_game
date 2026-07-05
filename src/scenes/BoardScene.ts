@@ -3,7 +3,7 @@ import type { Candy, Cell, CascadeStep, Move, SpecialActivation, SpecialCreation
 import { CandyType } from "../logic/CandyType";
 import { BOARD_COLS, BOARD_ROWS } from "../logic/constants";
 import { GameState } from "../logic/GameState";
-import { completeLevel, createInitialProgress, starsForScore } from "../logic/GameProgress";
+import { completeLevel, createInitialProgress, starsForLevel } from "../logic/GameProgress";
 import { getLevelById, LEVEL_COUNT } from "../logic/levels";
 import { scoreForStep } from "../logic/ScoreRules";
 import { SoundEngine } from "../audio/SoundEngine";
@@ -71,8 +71,18 @@ export class BoardScene extends Phaser.Scene {
   private muteButton!: Phaser.GameObjects.Text;
   private mapButton!: Phaser.GameObjects.Text;
   private animating = false;
+  private introActive = false;
   private hintTimer: Phaser.Time.TimerEvent | null = null;
   private hintTweens: Phaser.Tweens.Tween[] = [];
+  /** Jelly wobble overlays, keyed like `candyObjects` — null where a cell
+   * never had jelly or has already had it cleared. Only populated for
+   * jelly-goal levels. */
+  private jellyOverlays: (Phaser.GameObjects.Container | null)[][] = [];
+  /** Goal-segment display objects for a "collect" level, one per tracked
+   * CandyType, so updateHud() can update/pop each independently. */
+  private collectIcons: { type: CandyType; countText: Phaser.GameObjects.Text }[] = [];
+  private lastJellyRemaining = 0;
+  private lastCollectCollected: Partial<Record<CandyType, number>> = {};
 
   constructor() {
     super("BoardScene");
@@ -89,8 +99,13 @@ export class BoardScene extends Phaser.Scene {
     this.selectionTween = null;
     this.dragStart = null;
     this.animating = false;
+    this.introActive = false;
     this.hintTimer = null;
     this.hintTweens = [];
+    this.jellyOverlays = [];
+    this.collectIcons = [];
+    this.lastJellyRemaining = 0;
+    this.lastCollectCollected = {};
   }
 
   create(): void {
@@ -103,9 +118,14 @@ export class BoardScene extends Phaser.Scene {
     this.offsetX = (this.scale.width - boardPixelSize) / 2;
     this.offsetY = HUD_HEIGHT + BOARD_MARGIN / 2;
 
+    // Constructed before any rendering below so drawJellyOverlay() can query
+    // board.hasJelly() and createHud() can read the level's goal shape.
+    this.gameState = new GameState({ level, seed: Date.now() });
+
     drawSkyBackground(this, this.scale.width, this.scale.height);
     this.drawBoardPanel(boardPixelSize);
     this.drawTiles();
+    this.drawJellyOverlay();
 
     this.createHud();
     this.createMuteButton();
@@ -113,14 +133,13 @@ export class BoardScene extends Phaser.Scene {
 
     this.boardLayer = this.add.container(0, 0);
 
-    this.gameState = new GameState({ level, seed: Date.now() });
     this.drawBoard();
     this.updateHud();
 
     this.input.on("pointerdown", this.onPointerDown, this);
     this.input.on("pointerup", this.onPointerUp, this);
 
-    this.resetHintTimer();
+    this.showLevelIntro();
   }
 
   /** Light-cream board panel with a gentle drop shadow, replacing the
@@ -161,6 +180,74 @@ export class BoardScene extends Phaser.Scene {
         g.lineStyle(1.5, THEME.tile.stroke, 1);
         g.strokeRoundedRect(left, top, TILE_SIZE, TILE_SIZE, radius);
       }
+    }
+  }
+
+  /** Only for jelly-goal levels: a wobbly translucent blob sitting on top of
+   * every jelly-covered tile, tracked in `jellyOverlays` (indexed like
+   * `candyObjects`) so `playJellyClears` can pop and remove individual
+   * cells as they clear mid-cascade. Drawn once, outside `boardLayer`, same
+   * reasoning as `drawTiles()` — jelly position never moves with gravity. */
+  private drawJellyOverlay(): void {
+    this.jellyOverlays = Array.from({ length: BOARD_ROWS }, () => Array<Phaser.GameObjects.Container | null>(BOARD_COLS).fill(null));
+
+    if (this.gameState.level.goal.kind !== "jelly") {
+      return;
+    }
+    for (let row = 0; row < BOARD_ROWS; row++) {
+      for (let col = 0; col < BOARD_COLS; col++) {
+        if (this.gameState.board.hasJelly(col, row)) {
+          this.jellyOverlays[row][col] = this.makeJellyBlob(col, row);
+        }
+      }
+    }
+  }
+
+  private makeJellyBlob(col: number, row: number): Phaser.GameObjects.Container {
+    const { x, y } = this.cellCenter(col, row);
+    const container = this.add.container(x, y).setDepth(2);
+    const radius = TILE_SIZE * 0.4;
+    const blob = this.add
+      .circle(0, 0, radius, THEME.jelly.fill, 0.55)
+      .setStrokeStyle(2, THEME.jelly.stroke, 0.8);
+    container.add(blob);
+
+    const seed = (col * 131 + row * 977) % 997;
+    this.tweens.add({
+      targets: blob,
+      scaleX: 1.08,
+      scaleY: 0.92,
+      duration: 900 + (seed % 400),
+      delay: seed % 300,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.InOut",
+    });
+
+    return container;
+  }
+
+  /** Pops and removes the jelly overlay under each newly-cleared cell (fire
+   * and forget, concurrent with the candy clear-pop). */
+  private playJellyClears(cells: Cell[]): void {
+    if (cells.length === 0) {
+      return;
+    }
+    this.soundEngine.jellySplat();
+    for (const cell of cells) {
+      const overlay = this.jellyOverlays[cell.row]?.[cell.col];
+      if (!overlay) {
+        continue;
+      }
+      this.jellyOverlays[cell.row][cell.col] = null;
+      this.tweens.add({
+        targets: overlay,
+        scale: 1.5,
+        alpha: 0,
+        duration: 260,
+        ease: "Back.In",
+        onComplete: () => overlay.destroy(),
+      });
     }
   }
 
@@ -206,21 +293,64 @@ export class BoardScene extends Phaser.Scene {
     };
 
     this.add.text(segCenterX(0), labelY, "LEVEL", labelStyle).setOrigin(0.5);
-    this.add.text(segCenterX(1), labelY, "SCORE", labelStyle).setOrigin(0.5);
     this.add.text(segCenterX(2), labelY, "MOVES", labelStyle).setOrigin(0.5);
 
     this.add
       .text(segCenterX(0), numberY, String(this.levelId), { ...numberStyle, color: THEME.hudNumbers.level })
       .setOrigin(0.5);
-    this.scoreText = this.add
-      .text(segCenterX(1), numberY, "0", { ...numberStyle, color: THEME.hudNumbers.score })
-      .setOrigin(0.5);
-    this.scoreTargetText = this.add
-      .text(segCenterX(1), numberY + 15, "", { fontFamily: "sans-serif", fontSize: "9px", color: THEME.hud.label })
-      .setOrigin(0.5);
     this.movesText = this.add
       .text(segCenterX(2), numberY, "0", { ...numberStyle, color: MOVES_NORMAL_COLOR })
       .setOrigin(0.5);
+
+    this.createGoalSegment(segCenterX(1), labelY, numberY, labelStyle, numberStyle);
+  }
+
+  /** Populates the pill's middle segment based on the level's goal kind:
+   * "score" and "jelly" both reduce to a single label + big number + small
+   * subtext (reusing the same fields), while "collect" replaces that with a
+   * small row of piece-icon + "collected/target" pairs, one per tracked
+   * CandyType (levels track up to 3 — see levels.ts). */
+  private createGoalSegment(
+    segX: number,
+    labelY: number,
+    numberY: number,
+    labelStyle: Phaser.Types.GameObjects.Text.TextStyle,
+    numberStyle: Phaser.Types.GameObjects.Text.TextStyle,
+  ): void {
+    const goal = this.gameState.level.goal;
+
+    if (goal.kind === "score") {
+      this.add.text(segX, labelY, "SCORE", labelStyle).setOrigin(0.5);
+      this.scoreText = this.add.text(segX, numberY, "0", { ...numberStyle, color: THEME.hudNumbers.score }).setOrigin(0.5);
+      this.scoreTargetText = this.add
+        .text(segX, numberY + 15, "", { fontFamily: "sans-serif", fontSize: "9px", color: THEME.hud.label })
+        .setOrigin(0.5);
+      return;
+    }
+
+    if (goal.kind === "jelly") {
+      this.add.text(segX, labelY, "JELLY", labelStyle).setOrigin(0.5);
+      this.scoreText = this.add.text(segX, numberY, "0", { ...numberStyle, color: THEME.hudNumbers.score }).setOrigin(0.5);
+      this.scoreTargetText = this.add
+        .text(segX, numberY + 15, "left", { fontFamily: "sans-serif", fontSize: "9px", color: THEME.hud.label })
+        .setOrigin(0.5);
+      return;
+    }
+
+    this.add.text(segX, labelY, "COLLECT", labelStyle).setOrigin(0.5);
+    const types = Object.keys(goal.pieces).map(Number) as CandyType[];
+    const spacing = 30;
+    const startX = segX - ((types.length - 1) * spacing) / 2;
+    this.collectIcons = types.map((type, i) => {
+      const iconX = startX + i * spacing;
+      const asset = VEHICLE_ASSETS[type];
+      const iconScale = 18 / Math.max(asset.width, asset.height);
+      this.add.image(iconX, numberY - 4, asset.key).setDisplaySize(asset.width * iconScale, asset.height * iconScale);
+      const countText = this.add
+        .text(iconX, numberY + 12, "0/0", { fontFamily: "sans-serif", fontSize: "9px", color: THEME.hud.text, fontStyle: "bold" })
+        .setOrigin(0.5);
+      return { type, countText };
+    });
   }
 
   private createMuteButton(): void {
@@ -254,11 +384,43 @@ export class BoardScene extends Phaser.Scene {
 
   private updateHud(): void {
     const level = this.gameState.level;
-    this.scoreText.setText(String(this.gameState.score));
-    this.scoreTargetText.setText(`of ${level.targetScore}`);
     const moves = this.gameState.movesRemaining;
     this.movesText.setText(String(moves));
     this.movesText.setColor(moves <= MOVES_URGENT_THRESHOLD ? MOVES_URGENT_COLOR : MOVES_NORMAL_COLOR);
+
+    if (level.goal.kind === "score") {
+      this.scoreText.setText(String(this.gameState.score));
+      this.scoreTargetText.setText(`of ${level.targetScore}`);
+      return;
+    }
+
+    if (level.goal.kind === "jelly") {
+      const remaining = this.gameState.jellyRemaining;
+      if (remaining < this.lastJellyRemaining) {
+        this.popText(this.scoreText);
+      }
+      this.lastJellyRemaining = remaining;
+      this.scoreText.setText(String(remaining));
+      return;
+    }
+
+    const collectRemaining = this.gameState.collectRemaining;
+    for (const { type, countText } of this.collectIcons) {
+      const target = (level.goal.pieces as Partial<Record<CandyType, number>>)[type] ?? 0;
+      const left = collectRemaining[type] ?? 0;
+      const collected = target - left;
+      const prevCollected = this.lastCollectCollected[type] ?? 0;
+      if (collected > prevCollected) {
+        this.popText(countText);
+      }
+      this.lastCollectCollected[type] = collected;
+      countText.setText(`${collected}/${target}`);
+    }
+  }
+
+  /** A small scale-punch, used whenever a goal counter ticks toward completion. */
+  private popText(obj: Phaser.GameObjects.Text): void {
+    this.tweens.add({ targets: obj, scale: 1.35, duration: 90, yoyo: true, ease: "Quad.Out" });
   }
 
   private drawBoard(): void {
@@ -432,6 +594,9 @@ export class BoardScene extends Phaser.Scene {
   }
 
   private onPointerDown(pointer: Phaser.Input.Pointer): void {
+    if (this.introActive) {
+      return;
+    }
     this.stopHintWiggle();
     this.resetHintTimer();
 
@@ -446,6 +611,9 @@ export class BoardScene extends Phaser.Scene {
   }
 
   private onPointerUp(pointer: Phaser.Input.Pointer): void {
+    if (this.introActive) {
+      return;
+    }
     const start = this.dragStart;
     this.dragStart = null;
     if (!start || this.animating || this.gameState.status !== "playing") {
@@ -542,15 +710,22 @@ export class BoardScene extends Phaser.Scene {
     this.soundEngine.swap();
     this.candyObjects[a.row][a.col] = objB;
     this.candyObjects[b.row][b.col] = objA;
-    this.updateHud();
+    this.movesText.setText(String(this.gameState.movesRemaining));
 
-    await this.playCascadeSteps(result.steps);
+    // Snapshot pre-swap goal progress so playCascadeSteps can tick the HUD
+    // down live, per step, instead of jumping straight to the final value
+    // gameState.attemptSwap already computed above.
+    const jellyBefore = this.gameState.jellyRemaining;
+    const collectBefore = this.gameState.collectRemaining;
+
+    await this.playCascadeSteps(result.steps, jellyBefore, collectBefore);
 
     if (result.reshuffled) {
       this.showPopupText("Shuffled!");
       await this.reshuffleTransition();
     }
 
+    this.updateHud(); // authoritative final sync (also covers "score" levels)
     this.animating = false;
 
     if (result.status !== "playing") {
@@ -563,8 +738,15 @@ export class BoardScene extends Phaser.Scene {
 
   /** Replays a resolved cascade's steps in order: clear (pop + score popup),
    * gravity (fall), spawn (drop in). Compresses timing past 3 steps so a
-   * deep cascade never runs long (see the >3-step scale below). */
-  private async playCascadeSteps(steps: CascadeStep[]): Promise<void> {
+   * deep cascade never runs long (see the >3-step scale below). Also ticks
+   * the collect/jelly HUD counters down live, one step at a time, starting
+   * from the pre-swap snapshot (`jellyBefore`/`collectBefore`) rather than
+   * jumping straight to gameState's already-fully-resolved final numbers. */
+  private async playCascadeSteps(
+    steps: CascadeStep[],
+    jellyBefore: number,
+    collectBefore: Partial<Record<CandyType, number>>,
+  ): Promise<void> {
     if (steps.length === 0) {
       return;
     }
@@ -580,6 +762,10 @@ export class BoardScene extends Phaser.Scene {
       this.showPopupText(`Cascade x${steps.length}!`);
     }
 
+    const goal = this.gameState.level.goal;
+    let runningJellyRemaining = jellyBefore;
+    const runningCollectRemaining = { ...collectBefore };
+
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
       const stepNumber = i + 1;
@@ -589,6 +775,29 @@ export class BoardScene extends Phaser.Scene {
       this.showPopupText(`+${points}`, x, y, 18);
       this.soundEngine.pop(stepNumber);
       this.spawnClearBurst(step.cleared);
+      this.playJellyClears(step.jellyCleared);
+
+      if (goal.kind === "jelly" && step.jellyCleared.length > 0) {
+        runningJellyRemaining -= step.jellyCleared.length;
+        this.scoreText.setText(String(Math.max(0, runningJellyRemaining)));
+        this.popText(this.scoreText);
+      } else if (goal.kind === "collect") {
+        let changed = false;
+        for (const { type } of step.clearedCandies) {
+          if (type !== null && runningCollectRemaining[type] !== undefined) {
+            runningCollectRemaining[type] = Math.max(0, (runningCollectRemaining[type] ?? 0) - 1);
+            changed = true;
+          }
+        }
+        if (changed) {
+          for (const { type, countText } of this.collectIcons) {
+            const target = goal.pieces[type] ?? 0;
+            const left = runningCollectRemaining[type] ?? 0;
+            countText.setText(`${target - left}/${target}`);
+            this.popText(countText);
+          }
+        }
+      }
 
       if (step.activations.length > 0) {
         await this.playActivations(step.activations, scale);
@@ -1000,6 +1209,136 @@ export class BoardScene extends Phaser.Scene {
     this.resetHintTimer();
   }
 
+  /** One-line goal statement for the level intro popup, e.g. "Collect 20
+   * red cars!" — joins multiple tracked types with " + " for a multi-piece
+   * collect level. */
+  private goalStatement(): string {
+    const level = this.gameState.level;
+    const goal = level.goal;
+    if (goal.kind === "score") {
+      return `Score ${level.targetScore} points!`;
+    }
+    if (goal.kind === "jelly") {
+      return "Clear all the jelly!";
+    }
+    const parts = Object.entries(goal.pieces).map(
+      ([type, count]) => `${count} ${this.pieceName(Number(type) as CandyType, count ?? 0)}`,
+    );
+    return `Collect ${parts.join(" + ")}!`;
+  }
+
+  private pieceName(type: CandyType, count: number): string {
+    const name = VEHICLE_ASSETS[type].key.split("-")[0];
+    return count === 1 ? name : `${name}s`;
+  }
+
+  /** End-overlay subtitle: score levels show the numeric score as before;
+   * collect/jelly levels state goal completion instead, since score isn't
+   * their win condition. */
+  private goalSubtitle(won: boolean): string {
+    const level = this.gameState.level;
+    const goal = level.goal;
+
+    if (goal.kind === "score") {
+      return won ? `Score: ${this.gameState.score}` : `Score: ${this.gameState.score} / ${this.gameState.targetScore}`;
+    }
+    if (goal.kind === "jelly") {
+      return won ? "All jelly cleared!" : `${this.gameState.jellyRemaining} jelly left`;
+    }
+    if (won) {
+      return "Collected everything!";
+    }
+    const remaining = this.gameState.collectRemaining;
+    const parts = Object.entries(goal.pieces)
+      .map(([type, target]) => {
+        const left = remaining[Number(type) as CandyType] ?? 0;
+        return { left, text: `${target - left}/${target} ${this.pieceName(Number(type) as CandyType, target)}` };
+      })
+      .filter((p) => p.left > 0)
+      .map((p) => p.text);
+    return parts.join(", ");
+  }
+
+  /** Blocking intro popup shown once, right after a level's board is drawn:
+   * states the goal in one line with a small piece-icon row (for collect
+   * levels), and requires a tap to dismiss before any input reaches the
+   * board (see `introActive` in onPointerDown/Up). */
+  private showLevelIntro(): void {
+    this.introActive = true;
+    const level = this.gameState.level;
+    const centerX = this.scale.width / 2;
+    const centerY = this.scale.height / 2;
+    const panelHeight = 190;
+    const panelTop = centerY - panelHeight / 2;
+
+    const backdrop = this.add.rectangle(centerX, centerY, this.scale.width, this.scale.height, 0x4a3f5c, 0.55);
+    const panelGraphics = this.add.graphics();
+    panelGraphics.fillStyle(THEME.overlayPanel.fill, 1);
+    panelGraphics.fillRoundedRect(centerX - 135, panelTop, 270, panelHeight, 20);
+    panelGraphics.lineStyle(3, THEME.overlayPanel.stroke, 1);
+    panelGraphics.strokeRoundedRect(centerX - 135, panelTop, 270, panelHeight, 20);
+
+    const badge = THEME.goalBadge[level.goal.kind];
+    const badgeText = this.add.text(centerX, panelTop + 38, badge, { fontSize: "34px" }).setOrigin(0.5);
+
+    const titleText = this.add
+      .text(centerX, panelTop + 84, `Level ${level.id}`, {
+        fontFamily: "sans-serif",
+        fontSize: "15px",
+        color: THEME.overlayPanel.subtext,
+        fontStyle: "bold",
+      })
+      .setOrigin(0.5);
+
+    const goalText = this.add
+      .text(centerX, panelTop + 110, this.goalStatement(), {
+        fontFamily: "sans-serif",
+        fontSize: "17px",
+        color: THEME.overlayPanel.text,
+        fontStyle: "bold",
+        align: "center",
+        wordWrap: { width: 236 },
+      })
+      .setOrigin(0.5);
+
+    const pieceIcons: Phaser.GameObjects.GameObject[] = [];
+    if (level.goal.kind === "collect") {
+      const types = Object.keys(level.goal.pieces).map(Number) as CandyType[];
+      const spacing = 40;
+      const startX = centerX - ((types.length - 1) * spacing) / 2;
+      types.forEach((type, i) => {
+        const asset = VEHICLE_ASSETS[type];
+        const scale = 28 / Math.max(asset.width, asset.height);
+        pieceIcons.push(
+          this.add.image(startX + i * spacing, panelTop + 148, asset.key).setDisplaySize(asset.width * scale, asset.height * scale),
+        );
+      });
+    }
+
+    const prompt = this.add
+      .text(centerX, panelTop + panelHeight - 18, "Tap to begin", {
+        fontFamily: "sans-serif",
+        fontSize: "12px",
+        color: THEME.overlayPanel.subtext,
+      })
+      .setOrigin(0.5);
+    this.tweens.add({ targets: prompt, alpha: 0.4, duration: 550, yoyo: true, repeat: -1 });
+
+    const hitArea = this.add
+      .rectangle(centerX, centerY, this.scale.width, this.scale.height, 0x000000, 0)
+      .setInteractive({ useHandCursor: true });
+
+    const container = this.add
+      .container(0, 0, [backdrop, panelGraphics, badgeText, titleText, goalText, ...pieceIcons, prompt, hitArea])
+      .setDepth(25);
+
+    hitArea.on("pointerup", () => {
+      container.destroy();
+      this.introActive = false;
+      this.resetHintTimer();
+    });
+  }
+
   /** Win -> Level Complete (stars animated in one by one, persisted via
    * completeLevel + saveProgress right here, confetti drop); on the final
    * level, a "you finished everything" state with only a Level Map button.
@@ -1014,9 +1353,9 @@ export class BoardScene extends Phaser.Scene {
 
     let starsEarned = 0;
     if (won) {
-      starsEarned = starsForScore(level, this.gameState.score);
+      starsEarned = starsForLevel(level, this.gameState.score, this.gameState.movesRemaining);
       const progress = loadProgress() ?? createInitialProgress();
-      saveProgress(completeLevel(progress, level.id, this.gameState.score));
+      saveProgress(completeLevel(progress, level.id, this.gameState.score, this.gameState.movesRemaining));
     }
 
     const elements: Phaser.GameObjects.GameObject[] = [];
@@ -1050,9 +1389,7 @@ export class BoardScene extends Phaser.Scene {
       .setOrigin(0.5);
     elements.push(titleText);
 
-    const subtitle = won
-      ? `Score: ${this.gameState.score}`
-      : `Score: ${this.gameState.score} / ${this.gameState.targetScore}`;
+    const subtitle = this.goalSubtitle(won);
     const subtitleText = this.add
       .text(centerX, panelTop + (isFinalLevel ? 68 : 72), subtitle, {
         fontFamily: "sans-serif",

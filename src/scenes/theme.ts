@@ -105,4 +105,10 @@ export const THEME = {
   wrappedGlow: 0xffb300,
   wrappedGlowEdge: 0x6b4a1f,
   confetti: [0xff6b4a, 0xf4c430, 0x3fae5a, 0x4a90d9, 0x9b59b6, 0xffffff],
+  /** Jelly overlay (SLICE 8): a translucent wobbly blue-ish blob sitting on
+   * top of a tile, "cute not gross" per spec — a soft fill with a slightly
+   * darker stroke, popped in `splat` when cleared. */
+  jelly: { fill: 0x4aa8e0, stroke: 0x2c7fb0, splat: 0x1f5f85 },
+  /** Small per-node goal-kind badge on the level map. */
+  goalBadge: { score: "⭐", collect: "🚗", jelly: "🟦" },
 } as const;

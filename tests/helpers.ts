@@ -65,7 +65,7 @@ export function allEmpty(cols: number, rows: number): (Candy | null)[][] {
 
 /** Builds a LevelDef for tests, with sensible defaults overridable per-field. */
 export function makeLevel(overrides: Partial<LevelDef> = {}): LevelDef {
-  return { id: 1, targetScore: 1000, maxMoves: 10, candyTypes: 6, ...overrides };
+  return { id: 1, targetScore: 1000, maxMoves: 10, candyTypes: 6, goal: { kind: "score" }, ...overrides };
 }
 
 /** Full-board snapshot of Candy objects (or null), for equality/regression checks. */

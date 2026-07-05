@@ -70,6 +70,12 @@ export class SoundEngine {
     );
   }
 
+  /** A quick wet "splat" for jelly clearing — a short downward pitch glide,
+   * distinct from the drier candy `pop()`. */
+  jellySplat(): void {
+    this.playSweep(500, 220, 0.14, { type: "sine", gain: 0.16 });
+  }
+
   private getContext(): AudioContext {
     if (!this.ctx) {
       this.ctx = new AudioContext();

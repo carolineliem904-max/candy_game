@@ -13,7 +13,16 @@ function matchOfSize(size: number, type: CandyType = CandyType.RED): Match {
 
 function stepWithMatches(...matches: Match[]): CascadeStep {
   const cleared = matches.flatMap((m) => m.cells);
-  return { matches, activations: [], specialsCreated: [], cleared, moves: [], spawns: [] };
+  return {
+    matches,
+    activations: [],
+    specialsCreated: [],
+    cleared,
+    clearedCandies: [],
+    jellyCleared: [],
+    moves: [],
+    spawns: [],
+  };
 }
 
 describe("ScoreRules", () => {
@@ -66,6 +75,8 @@ describe("ScoreRules", () => {
       activations: [],
       specialsCreated: [creation],
       cleared: match.cells.slice(1), // the spawn cell (col0) isn't cleared, it becomes the special
+      clearedCandies: [],
+      jellyCleared: [],
       moves: [],
       spawns: [],
     };
@@ -91,6 +102,8 @@ describe("ScoreRules", () => {
       ],
       specialsCreated: [],
       cleared: effectCells,
+      clearedCandies: [],
+      jellyCleared: [],
       moves: [],
       spawns: [],
     };

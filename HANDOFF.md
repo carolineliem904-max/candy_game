@@ -42,16 +42,13 @@ Built by Caroline (product owner / QA) with Claude Code as builder.
 - [x] SLICE 6A: Level system & progression (numbered levels, stars, localStorage)
 - [x] SLICE 6B: Special candies
 - [x] SLICE 7: Theme & art pass — "Beep Beep!" (vehicles)
+- [x] SLICE 8: Level goals & expanded levels (collect/jelly goals, 20-level set)
 
 ## STATUS
-- Current slice: SLICE 7 (vehicle theme/art pass, "Beep Beep!") — UI restyle and final custom sprite
-  set both approved by Caroline, speed-line alignment bug fixed, committed (`2e9851a`) and pushed to
-  `main`. 73/73 tests pass, build clean.
-- Deployed URL: https://candygame-six.vercel.app — confirmed live and matching: the production alias
-  serves bundle `index-CHEBMgch.js`, identical to the local build, and a headless-Chromium pass
-  against the live URL loaded the level map (mascot bubble, restyled nodes/background) with zero
-  console errors. Only remaining item is Caroline's son's actual playtest verdict — see Open
-  Questions.
+- Current slice: SLICE 8 (level goals & expanded levels) — all 4 checkpoints implemented and
+  verified, tests green throughout, build clean. See DECISIONS LOG below for the full breakdown.
+- Deployed URL: https://candygame-six.vercel.app — see the SLICE 8 decisions-log entry for the
+  post-commit deploy confirmation.
 
 ## DECISIONS LOG
 - 2026-07-03: Stack locked (Phaser 3 + TS + Vite). Logic/render separation mandated.
@@ -733,20 +730,129 @@ Built by Caroline (product owner / QA) with Claude Code as builder.
   full SLICE 7 arc (vehicle theme → emoji retry → UI restyle → final custom sprites → contrast/
   alignment fixes), pushed to `main`, triggering the existing Vercel auto-deploy.
 
+- 2026-07-06: **SLICE 8 implemented — all 4 checkpoints (sprite-quality fix, goal engine, 20-level
+  expansion, rendering/UX), tests green at each stage per spec (73 → 92 → 114/114 across the
+  checkpoints).**
+  **Checkpoint 0 (sprite quality)**: the spec's premise — `pixelArt: true` still left in the Phaser
+  config — turned out to already be false: it was removed during SLICE 7's brief emoji interlude and
+  never came back when Caroline's custom sprite set was wired in. Verified rather than assumed: a
+  zoomed screenshot of a live board shows smooth-edged, non-pixelated vehicles at their ~31px render
+  size against ~250-360px source art (well past the spec's 2x-resolution floor). No code change
+  needed; documented as "already fixed by a prior pass" rather than silently skipped.
+  **Checkpoint 1 (goal engine, logic-only)**: new `src/logic/LevelGoal.ts` — a discriminated union
+  `{kind:'score'}` / `{kind:'collect', pieces: Partial<Record<CandyType,number>>}` /
+  `{kind:'jelly', jellyCells: Cell[]}` — added as a required `goal` field on `LevelDef`. One
+  deliberate deviation from the spec's literal sketch, flagged since it's easy to assume otherwise:
+  the score goal doesn't carry its own `target` (unlike the spec's `{kind:'score', target:number}`) —
+  it reads `level.targetScore` instead, avoiding two sources of truth for the same number now that
+  `targetScore` already exists on every `LevelDef` for star-threshold purposes regardless of goal kind.
+  `Board.ts` gained a `jelly: boolean[][]` overlay (5th constructor param, defaults to `[]` so every
+  existing call site is unaffected) that does **not** move with gravity — it's keyed to
+  (col,row) position like a floor tile, not to whichever candy currently occupies that cell, matching
+  the spec's "visual layer + win condition only" framing. `CascadeStep` gained two new fields:
+  `clearedCandies: {cell, type}[]` (captures each cleared cell's color *before* nulling, so collection
+  tallying works regardless of match vs. special-effect vs. cascade clearing — "every cleared piece of
+  that type counts" from the spec, cheaply, with no separate scan needed) and `jellyCleared: Cell[]`
+  (cells in that step's `cleared` set that were carrying jelly, now removed). `GameState` tracks
+  `_collectRemaining` (a live decrementing copy of the goal's `pieces` targets) and exposes
+  `collectRemaining`/`jellyRemaining` getters; `isGoalMet()` branches on `level.goal.kind` (score:
+  score ≥ target; collect: every tracked count reached; jelly: `board.jellyRemaining() === 0`) instead
+  of the old hardcoded score check. `GameProgress.ts` gained `starsForMovesRemaining` (0 left → 1,
+  1-3 → 2, 4+ → 3, per spec) and a `starsForLevel(level, score, movesRemaining)` dispatcher so
+  `completeLevel` (now taking a required `movesRemaining` 4th param) and any UI code never have to
+  branch on goal kind themselves — one call site, correct formula picked automatically.
+  20 new tests: `tests/board-goals.test.ts` (7 — jelly init/removal via a plain match, jelly removal
+  via a *striped candy's row sweep far from the triggering match* specifically proving effect-based
+  clearing works, jelly not blocking swaps/gravity, `clearedCandies` color accuracy, determinism);
+  `tests/game-state-goals.test.ts` (9 — collect win/lose/tally-across-cascades/untracked-colors-
+  ignored, jelly win/lose/reset-restores-original-jelly-layout, score regression, determinism);
+  3 new in `tests/game-progress.test.ts` (`starsForMovesRemaining` boundaries, `starsForLevel`
+  dispatch for both formulas) — 92/92 total, zero Phaser imports in `src/logic/` still holds.
+  **Checkpoint 2 (level set expansion)**: `levels.ts` expanded from 10 to 20 levels. L1-4 untouched
+  (score, as before); L5 is the first collect level (gentle: one type, 12 pieces, 20 moves); L6-20
+  interleave on a repeating 5-slot cycle (collect, jelly, score, collect, jelly) × 3, which works out
+  to exactly the spec's ~7 score / ~7 collect / ~6 jelly mix (7/7/6, counted) with L20 landing on
+  jelly for a "clear the whole board" finale. Jelly coverage escalates via 5 small pattern-generator
+  helpers (`centerBlock`, `edgeRows`, `edgeColumns`, `cornerClusters`, `borderRing`) matching the
+  spec's "corners and edges are harder to hit" guidance — center (L7, mildest) → edges (L10, L12) →
+  corners (L15, L17) → full border ring (L20, finale). Collect levels tighten from 1 tracked type
+  (L5) up to 3 (L14, L19) as the curve progresses. **Builder's bot-winnability check**
+  (`tests/levels-winnable.test.ts`, 20 tests, one per level): a "random-move bot" tries up to 40
+  random adjacent-cell swaps per turn (free retries, since a non-matching swap costs no move in this
+  game) before falling back to the board's own `findAnyValidMove()` — mostly-random per spec's
+  wording, while still guaranteeing forward progress every turn — replayed across up to 200 fresh-seed
+  attempts per level, requiring at least one win. All 20 levels passed; an ad hoc instrumented run
+  (not committed) showed every level winning within 1-9 attempts (worst case: the 4 hardest jelly
+  levels + one mid collect level, all needing up to 9 tries), several with genuinely tight margins
+  (a few levels won with 0-2 moves to spare) — confirming none are mathematically impossible without
+  making the curve trivially easy either. 114/114 tests total after this checkpoint.
+  **Checkpoint 3 (rendering & UX)**: HUD's middle pill segment is now goal-aware
+  (`BoardScene.createGoalSegment`/`updateHud`): score/jelly both reduce to the existing single
+  label+big-number+subtext layout (just relabeled JELLY/"left" for jelly); collect replaces it with a
+  small row of piece-icon + "collected/target" pairs, one per tracked CandyType (up to 3, per the
+  L14/L19 levels). Both jelly's number and collect's counters tick down **live, per cascade step**
+  during the swap animation rather than jumping straight to the post-swap final value: `GameState`
+  already resolves the whole cascade synchronously before `BoardScene` starts animating it, so
+  `playCascadeSteps` takes a pre-swap snapshot (`jellyBefore`/`collectBefore`) and maintains its own
+  running counters, decrementing them exactly when each step's clear-pop fires (same moment the
+  existing "+N" score popup appears) — with a small scale-punch (`popText`) on every tick. A final
+  authoritative `updateHud()` call after the whole sequence settles guarantees no drift; the tradeoff
+  is one harmless extra pop at the very end (the authoritative call's own change-detection doesn't
+  know about the live ticks that already happened) — cosmetically redundant, not a bug, not worth the
+  extra plumbing to suppress.
+  Jelly cells render as a translucent wobbly blue blob (`THEME.jelly`, new) sitting on the tile,
+  independently tracked in a `jellyOverlays` grid (parallel to `candyObjects`) so `playJellyClears` can
+  pop (scale+fade, `Back.In`) and destroy just the cells a cascade step actually cleared, plus a new
+  `SoundEngine.jellySplat()` (a short downward pitch-glide, distinct from the drier candy `pop()`).
+  Level intro popup (`showLevelIntro`, new): a blocking modal on `BoardScene.create()` (input is
+  gated by a new `introActive` flag checked first in both pointer handlers) stating the goal in one
+  line — "Score N points!" / "Collect N cars!" (auto-pluralized) / "Clear all the jelly!" — with a
+  small piece-icon row for collect levels, dismissed by a full-screen tap. Win/lose overlay subtitle
+  is now goal-aware too (`goalSubtitle`): score keeps its old numeric text; jelly says "All jelly
+  cleared!" or "N jelly left"; collect says "Collected everything!" or lists each still-short type as
+  "8/12 cars" (only the types not yet met, so a win never lists anything).
+  Level map: each node got a small white-chip badge showing its goal kind (⭐/🚗/🟦 via
+  `THEME.goalBadge`), and — since 20 nodes no longer fit one screen — `LevelMapScene` now scrolls: the
+  whole scene (background included) is drawn at full content height and pans via `camera.scrollY`,
+  dragged directly (a `dragMoved` flag, set once movement exceeds a small threshold, suppresses a
+  node's tap-to-enter if the gesture was actually a scroll — same tap-vs-drag disambiguation pattern
+  `BoardScene` already uses for swipe swaps) and auto-scrolled on load to center the player's
+  highest-unlocked level rather than always opening at the top.
+  **Checkpoint 4 (verification)**: 114/114 tests, clean build, zero Phaser imports in `src/logic/`
+  confirmed. Full end-to-end headless-Chromium pass (Playwright, installed temporarily and removed
+  after, same pattern as every prior slice) via a temporary `window.__game` debug hook (added, used,
+  removed — `git status` clean of stray files/deps before finishing): played one level of every goal
+  kind to **both** a win and a loss — score (L1 win, L18 loss), collect (L5 win and loss, both seen
+  across the Checkpoint 3 verification pass and this final one), jelly (L7 win and loss) — confirming
+  the goal-aware HUD, intro popup, jelly overlay/splat/sound, and win/lose overlay all render
+  correctly with **zero console errors** across every run. Also confirmed live gameplay (not just
+  screenshots) that jelly count and collect counters visibly tick down through real `attemptSwap`
+  calls, and that the level-map scroll drag genuinely moves the camera (not just a static screenshot).
+  **Not done this slice**: no numeric retuning beyond what's in the one `levels.ts` table — per spec,
+  Caroline retunes after playtesting (see Open Questions).
+
 ## OPEN QUESTIONS
-- **SLICE 7 shipped; one thing left**: get Caroline's son's actual playtest verdict — the spec's own
-  literal acceptance test for this slice, still not collected. Everything else is done: UI restyle and
-  final custom sprite set both approved, speed-line alignment fixed, committed (`2e9851a`), pushed,
-  and confirmed live at https://candygame-six.vercel.app with zero console errors.
+- **SLICE 8's own "After Completion" ask, not yet done**: Caroline + son should playtest L1-L20 —
+  the son's favorite goal kind (score/collect/jelly) is meant to determine what post-v1 leans into,
+  per the spec. Nothing in the level table has had a real human playthrough yet; the bot-winnability
+  check (20/20 passing) only proves every level is *possible*, not that the difficulty curve or move
+  budgets feel right — expect a retune pass after this playtest, same as every prior level-curve slice.
+- **Level map scrolling is new and untested on a real touch device**: SLICE 8 added camera-drag
+  scrolling to `LevelMapScene` (20 nodes no longer fit one screen) verified only via simulated mouse
+  drag in headless Chromium. Worth Caroline confirming the drag feel and the tap-vs-scroll
+  disambiguation (a `dragMoved` threshold) both feel natural on her son's actual phone/tablet.
+  Also worth deciding if the plain drag-scroll is enough long-term or if it eventually wants a visible
+  scrollbar/indicator once level counts grow further.
+- **SLICE 7 shipped; son's playtest verdict still not collected** (older, still open): the spec's own
+  literal acceptance test for SLICE 7, unrelated to SLICE 8. Everything else from SLICE 7 is done: UI
+  restyle and final custom sprite set both approved, speed-line alignment fixed, committed (`2e9851a`),
+  pushed, and confirmed live at https://candygame-six.vercel.app with zero console errors.
 - Final game name: "Beep Beep!" shipped as-is in SLICE 7 (the spec's working title) — repo/URL
   renaming was explicitly out of scope for SLICE 7 and stays cosmetic/later per that spec.
-- Per SLICE 6B's spec ("After Completion"): Caroline should replay L1-L10 for the real difficulty
-  verdict now that specials exist — star thresholds may need a final retune (expected, not
-  pre-tuned). This folds in the pre-existing curve-playtest question below.
-- Default level curve (L1-L10 in `src/logic/levels.ts`) still hasn't had a real human playthrough —
-  the L5-L10 flattening was a judgment call from reasoning about the numbers, not from actual play.
-  Caroline should playtest the whole curve, especially L8's ~610/move pinch point, now with specials
-  in play (which are expected to ease that pinch point — see the balance pass finding below).
+- Per SLICE 6B's spec ("After Completion"): Caroline should replay the full level set for the real
+  difficulty verdict now that both specials (SLICE 6B) and goals (SLICE 8) exist — star thresholds may
+  need a final retune (expected, not pre-tuned). Folds into the SLICE 8 playtest ask above — one
+  combined playtest pass can cover both.
 - **Balance pass came in under target — flagged for Architect**: SLICE 6B's Checkpoint 4 measured
   specials raising naive-play score/move by +14.9% (L4) and +22.9% (L8), against the spec's rough
   +30-60% target. The one authorized self-tuning knob (`SPECIAL_CREATION_BONUS`) was tried at 300 and
