@@ -9,25 +9,30 @@ import { scoreForStep } from "../logic/ScoreRules";
 import { SoundEngine } from "../audio/SoundEngine";
 import { loadProgress, saveProgress } from "../storage/progressStorage";
 import { BOARD_MARGIN, CELL_PADDING, CELL_SIZE, DRAG_THRESHOLD, HUD_HEIGHT } from "./layout";
+import { PARTICLE_COLORS, TRAFFIC_LIGHT_ASSET, THEME, VEHICLE_ASSETS, type VehicleAsset } from "./theme";
+import { drawSkyBackground } from "./background";
+import { drawGlossyButton } from "./uiKit";
 
-const CANDY_COLORS: Record<CandyType, number> = {
-  [CandyType.RED]: 0xe74c3c,
-  [CandyType.ORANGE]: 0xe67e22,
-  [CandyType.YELLOW]: 0xf1c40f,
-  [CandyType.GREEN]: 0x2ecc71,
-  [CandyType.BLUE]: 0x3498db,
-  [CandyType.PURPLE]: 0x9b59b6,
-};
+/** Matches `drawTiles()`'s tile size exactly (the visible white square, not
+ * the full 44px cell) — the two must stay in sync or pieces overflow their
+ * own tile. That's exactly the bug this constant fixes: `PIECE_TARGET_SIZE`
+ * was previously computed from `CELL_SIZE` (44) instead of this, so at 85%
+ * it came out to ~37px against a 36px tile — a hair too big, leaving zero
+ * clearance for the speed-line decoration beside a striped piece and
+ * making the lines read as misaligned/overlapping the sprite. */
+const TILE_SIZE = CELL_SIZE - 8;
 
-const BOMB_COLOR = 0x1c1a24;
-const STRIPE_COLOR = 0xffffff;
-const WRAPPED_RING_COLOR = 0xffd700;
+/** ~85% of the tile width. Was 0.68, but that ratio was tuned before the
+ * vehicle PNGs had their transparent margins trimmed — once trimmed, the
+ * visible artwork fills its own bounding box, so the same 0.68 made pieces
+ * read as too small; 0.85 is the "fills the tile" size Caroline asked for
+ * against the now-tight sprite bounds. Sprites have varying native aspect
+ * ratios, so this is the *larger* dimension's target; see `makeSprite()`. */
+const PIECE_TARGET_SIZE = Math.round(TILE_SIZE * 0.85);
 
-const SELECTION_COLOR = 0xffffff;
-const EMPTY_SOCKET_COLOR = 0x13111d;
 const MOVES_URGENT_THRESHOLD = 5;
-const MOVES_URGENT_COLOR = "#ff4d4d";
-const MOVES_NORMAL_COLOR = "#ffffff";
+const MOVES_URGENT_COLOR = THEME.hud.urgent;
+const MOVES_NORMAL_COLOR = THEME.hud.text;
 
 // Animation timing (see playCascadeSteps for the >3-step compression rule
 // that keeps a full sequence under ~4s even for deep cascades).
@@ -61,6 +66,7 @@ export class BoardScene extends Phaser.Scene {
   private selectionTween: Phaser.Tweens.Tween | null = null;
   private dragStart: DragStart | null = null;
   private scoreText!: Phaser.GameObjects.Text;
+  private scoreTargetText!: Phaser.GameObjects.Text;
   private movesText!: Phaser.GameObjects.Text;
   private muteButton!: Phaser.GameObjects.Text;
   private mapButton!: Phaser.GameObjects.Text;
@@ -97,15 +103,9 @@ export class BoardScene extends Phaser.Scene {
     this.offsetX = (this.scale.width - boardPixelSize) / 2;
     this.offsetY = HUD_HEIGHT + BOARD_MARGIN / 2;
 
-    this.add
-      .rectangle(
-        this.scale.width / 2,
-        HUD_HEIGHT + (boardPixelSize + BOARD_MARGIN) / 2,
-        boardPixelSize + BOARD_MARGIN,
-        boardPixelSize + BOARD_MARGIN,
-        0x2b2640,
-      )
-      .setStrokeStyle(2, 0x453f63);
+    drawSkyBackground(this, this.scale.width, this.scale.height);
+    this.drawBoardPanel(boardPixelSize);
+    this.drawTiles();
 
     this.createHud();
     this.createMuteButton();
@@ -123,29 +123,113 @@ export class BoardScene extends Phaser.Scene {
     this.resetHintTimer();
   }
 
+  /** Light-cream board panel with a gentle drop shadow, replacing the
+   * cooler blue-gray SLICE 7 follow-up panel — "polished mobile casual
+   * game" pass. */
+  private drawBoardPanel(boardPixelSize: number): void {
+    const panelSize = boardPixelSize + BOARD_MARGIN;
+    const panelX = this.scale.width / 2 - panelSize / 2;
+    const panelY = HUD_HEIGHT;
+
+    const shadow = this.add.graphics();
+    shadow.fillStyle(0x000000, 0.1);
+    shadow.fillRoundedRect(panelX, panelY + 5, panelSize, panelSize, 16);
+
+    const g = this.add.graphics();
+    g.fillStyle(THEME.boardPanel.fill, 1);
+    g.fillRoundedRect(panelX, panelY, panelSize, panelSize, 16);
+    g.lineStyle(3, THEME.boardPanel.stroke, 1);
+    g.strokeRoundedRect(panelX, panelY, panelSize, panelSize, 16);
+  }
+
+  /** A light rounded tile behind every cell (drawn once, outside
+   * `boardLayer` so `drawBoard()`'s redraws never touch it) — the classic
+   * white-tile match-3 backing, with a small gap between tiles and a very
+   * soft shadow for a touch of depth. */
+  private drawTiles(): void {
+    const radius = 8;
+    const g = this.add.graphics();
+    for (let row = 0; row < BOARD_ROWS; row++) {
+      for (let col = 0; col < BOARD_COLS; col++) {
+        const { x, y } = this.cellCenter(col, row);
+        const left = x - TILE_SIZE / 2;
+        const top = y - TILE_SIZE / 2;
+        g.fillStyle(THEME.tile.shadow, 0.35);
+        g.fillRoundedRect(left, top + 1.5, TILE_SIZE, TILE_SIZE, radius);
+        g.fillStyle(THEME.tile.fill, 1);
+        g.fillRoundedRect(left, top, TILE_SIZE, TILE_SIZE, radius);
+        g.lineStyle(1.5, THEME.tile.stroke, 1);
+        g.strokeRoundedRect(left, top, TILE_SIZE, TILE_SIZE, radius);
+      }
+    }
+  }
+
+  /** Rounded cream "pill" HUD with 3 segments (Level / Score / Moves),
+   * each a small caption label over a large colorful number — replacing
+   * the old two-line plain-text HUD. */
   private createHud(): void {
     const centerX = this.scale.width / 2;
+    const pillW = 260;
+    const pillH = 58;
+    const pillY = 6;
+    const pillX = centerX - pillW / 2;
+
+    const shadow = this.add.graphics();
+    shadow.fillStyle(0x000000, 0.1);
+    shadow.fillRoundedRect(pillX, pillY + 3, pillW, pillH, pillH / 2);
+
+    const chip = this.add.graphics();
+    chip.fillStyle(THEME.hud.chip, 1);
+    chip.fillRoundedRect(pillX, pillY, pillW, pillH, pillH / 2);
+    chip.lineStyle(2, THEME.hud.chipStroke, 1);
+    chip.strokeRoundedRect(pillX, pillY, pillW, pillH, pillH / 2);
+
+    const segW = pillW / 3;
+    chip.lineStyle(2, THEME.hud.chipStroke, 0.5);
+    chip.lineBetween(pillX + segW, pillY + 10, pillX + segW, pillY + pillH - 10);
+    chip.lineBetween(pillX + segW * 2, pillY + 10, pillX + segW * 2, pillY + pillH - 10);
+
+    const segCenterX = (i: number) => pillX + segW * i + segW / 2;
+    const labelY = pillY + 13;
+    const numberY = pillY + 35;
+
+    const labelStyle: Phaser.Types.GameObjects.Text.TextStyle = {
+      fontFamily: "sans-serif",
+      fontSize: "10px",
+      color: THEME.hud.label,
+      fontStyle: "bold",
+    };
+    const numberStyle: Phaser.Types.GameObjects.Text.TextStyle = {
+      fontFamily: "sans-serif",
+      fontSize: "20px",
+      fontStyle: "bold",
+    };
+
+    this.add.text(segCenterX(0), labelY, "LEVEL", labelStyle).setOrigin(0.5);
+    this.add.text(segCenterX(1), labelY, "SCORE", labelStyle).setOrigin(0.5);
+    this.add.text(segCenterX(2), labelY, "MOVES", labelStyle).setOrigin(0.5);
+
+    this.add
+      .text(segCenterX(0), numberY, String(this.levelId), { ...numberStyle, color: THEME.hudNumbers.level })
+      .setOrigin(0.5);
     this.scoreText = this.add
-      .text(centerX, 15, "", {
-        fontFamily: "sans-serif",
-        fontSize: "15px",
-        color: "#ffffff",
-        fontStyle: "bold",
-      })
+      .text(segCenterX(1), numberY, "0", { ...numberStyle, color: THEME.hudNumbers.score })
+      .setOrigin(0.5);
+    this.scoreTargetText = this.add
+      .text(segCenterX(1), numberY + 15, "", { fontFamily: "sans-serif", fontSize: "9px", color: THEME.hud.label })
       .setOrigin(0.5);
     this.movesText = this.add
-      .text(centerX, 35, "", {
-        fontFamily: "sans-serif",
-        fontSize: "14px",
-        color: MOVES_NORMAL_COLOR,
-      })
+      .text(segCenterX(2), numberY, "0", { ...numberStyle, color: MOVES_NORMAL_COLOR })
       .setOrigin(0.5);
   }
 
   private createMuteButton(): void {
+    const x = this.scale.width - 30;
+    const y = 35;
+    drawGlossyButton(this, x, y, 38, 38, THEME.hud.chip, THEME.hud.chipStroke).setDepth(14);
     this.muteButton = this.add
-      .text(this.scale.width - 10, 8, "🔊", { fontSize: "16px" })
-      .setOrigin(1, 0)
+      .text(x, y, "🔊", { fontSize: "16px" })
+      .setOrigin(0.5)
       .setDepth(15)
       .setInteractive({ useHandCursor: true });
 
@@ -156,9 +240,12 @@ export class BoardScene extends Phaser.Scene {
   }
 
   private createMapButton(): void {
+    const x = 30;
+    const y = 35;
+    drawGlossyButton(this, x, y, 38, 38, THEME.hud.chip, THEME.hud.chipStroke).setDepth(14);
     this.mapButton = this.add
-      .text(10, 8, "☰ Map", { fontFamily: "sans-serif", fontSize: "12px", color: "#ffffff" })
-      .setOrigin(0, 0)
+      .text(x, y, "☰", { fontFamily: "sans-serif", fontSize: "16px", color: THEME.hud.text, fontStyle: "bold" })
+      .setOrigin(0.5)
       .setDepth(15)
       .setInteractive({ useHandCursor: true });
 
@@ -167,9 +254,10 @@ export class BoardScene extends Phaser.Scene {
 
   private updateHud(): void {
     const level = this.gameState.level;
-    this.scoreText.setText(`Level ${level.id} · Score: ${this.gameState.score} / ${this.gameState.targetScore}`);
+    this.scoreText.setText(String(this.gameState.score));
+    this.scoreTargetText.setText(`of ${level.targetScore}`);
     const moves = this.gameState.movesRemaining;
-    this.movesText.setText(`Moves left: ${moves}`);
+    this.movesText.setText(String(moves));
     this.movesText.setColor(moves <= MOVES_URGENT_THRESHOLD ? MOVES_URGENT_COLOR : MOVES_NORMAL_COLOR);
   }
 
@@ -185,62 +273,146 @@ export class BoardScene extends Phaser.Scene {
 
         if (cell === null) {
           const socketRadius = (CELL_SIZE - CELL_PADDING * 2) / 2 - 4;
-          const socket = this.add.circle(x, y, socketRadius, EMPTY_SOCKET_COLOR).setStrokeStyle(2, 0x2b2640);
+          const socket = this.add.circle(x, y, socketRadius, THEME.socket.fill).setStrokeStyle(2, THEME.socket.stroke);
           this.boardLayer.add(socket);
           this.candyObjects[row][col] = null;
           continue;
         }
 
-        const candy = this.drawCandyVisual(x, y, cell);
+        const candy = this.drawCandyVisual(x, y, col, row, cell);
         this.boardLayer.add(candy);
         this.candyObjects[row][col] = candy;
       }
     }
   }
 
-  /** Builds a candy's visual as a Container so specials can layer distinct,
-   * still-programmatic decoration on top of the base circle: striped gets a
-   * stripe bar (oriented H/V), wrapped gets a second gold ring, a color bomb
-   * is a dark multi-dot circle instead of a colored one. The base circle's
-   * fill color is stashed via setData so callers (e.g. the clear-burst
-   * particles) don't need to know which special this is. */
-  private drawCandyVisual(x: number, y: number, cell: Candy): Phaser.GameObjects.Container {
-    const radius = (CELL_SIZE - CELL_PADDING * 2) / 2;
-    const color = cell.special === "bomb" ? BOMB_COLOR : CANDY_COLORS[cell.type as CandyType];
-
+  /** Builds a candy's visual as a two-layer Container: the outer layer is
+   * what game logic tweens for board position (swap/gravity/spawn), the
+   * inner `visual` layer holds the sprite (plus, for striped/wrapped, an
+   * effect overlay) and is what the idle bob loop and selection wiggle
+   * animate — keeping those cosmetic loops on a separate transform from the
+   * ones game logic drives avoids the two fighting over the same
+   * x/y/angle. Specials are overlays on the base vehicle sprite, not
+   * separate images — except the color bomb, which has no underlying color
+   * to decorate and so is fully replaced by the traffic-light sprite. */
+  private drawCandyVisual(x: number, y: number, col: number, row: number, cell: Candy): Phaser.GameObjects.Container {
     const container = this.add.container(x, y);
-    const base = this.add.circle(0, 0, radius, color).setStrokeStyle(2, 0x1e1a2e);
-    container.add(base);
-    container.setData("color", color);
+    const visual = this.add.container(0, 0);
+    container.add(visual);
+    container.setData("visual", visual);
 
-    switch (cell.special) {
-      case "stripedH":
-        container.add(this.add.rectangle(0, 0, radius * 1.7, 5, STRIPE_COLOR).setAlpha(0.9));
-        break;
-      case "stripedV":
-        container.add(this.add.rectangle(0, 0, 5, radius * 1.7, STRIPE_COLOR).setAlpha(0.9));
-        break;
-      case "wrapped":
-        container.add(this.add.circle(0, 0, radius + 3, 0x000000, 0).setStrokeStyle(3, WRAPPED_RING_COLOR));
-        break;
-      case "bomb": {
-        const dots = [
-          [-5, -5],
-          [5, -5],
-          [0, 0],
-          [-5, 5],
-          [5, 5],
-        ];
-        for (const [dx, dy] of dots) {
-          container.add(this.add.circle(dx, dy, 2.5, 0xffffff).setAlpha(0.85));
-        }
-        break;
+    if (cell.special === "bomb") {
+      visual.add(this.makeSprite(TRAFFIC_LIGHT_ASSET));
+      container.setData("color", 0xffffff);
+    } else {
+      const asset = VEHICLE_ASSETS[cell.type as CandyType];
+      if (cell.special === "stripedH" || cell.special === "stripedV") {
+        this.addSpeedLines(visual, cell.special === "stripedH");
       }
-      default:
-        break;
+      if (cell.special === "wrapped") {
+        this.addWrappedGlow(visual);
+      }
+      visual.add(this.makeSprite(asset));
+      container.setData("color", PARTICLE_COLORS[cell.type as CandyType]);
     }
 
+    this.attachIdleMotion(visual, col, row);
+
     return container;
+  }
+
+  /** A vehicle sprite scaled so its larger native dimension matches
+   * `PIECE_TARGET_SIZE`, preserving aspect ratio (sprites aren't uniformly
+   * square, unlike the old emoji glyphs). */
+  private makeSprite(asset: VehicleAsset): Phaser.GameObjects.Image {
+    const scale = PIECE_TARGET_SIZE / Math.max(asset.width, asset.height);
+    return this.add.image(0, 0, asset.key).setDisplaySize(asset.width * scale, asset.height * scale);
+  }
+
+  /** Animated speed-lines *behind* the sprite (added to `visual` before the
+   * sprite itself, so it renders underneath), oriented to the clear
+   * direction: horizontal bars for a row-clearing stripe, vertical for a
+   * column-clearing one. The continuous shimmer (alpha + slight slide) is
+   * what makes them read as "speed" rather than a static decoration;
+   * tracked in `decorTweens` so `destroyCandy` can stop it. */
+  private addSpeedLines(visual: Phaser.GameObjects.Container, horizontal: boolean): void {
+    const tweens: Phaser.Tweens.Tween[] = [];
+    const lengths = [22, 16, 10];
+    lengths.forEach((len, i) => {
+      const offset = (i - 1) * 7;
+      const bar = horizontal
+        ? this.add.rectangle(-18, offset, len, 2.6, THEME.speedLine)
+        : this.add.rectangle(offset, -18, 2.6, len, THEME.speedLine);
+      bar.setAlpha(0.75);
+      visual.add(bar);
+      tweens.push(
+        this.tweens.add({
+          targets: bar,
+          alpha: 1,
+          x: horizontal ? bar.x - 4 : bar.x,
+          y: horizontal ? bar.y : bar.y - 4,
+          duration: 260 + i * 40,
+          delay: i * 80,
+          yoyo: true,
+          repeat: -1,
+          ease: "Sine.InOut",
+        }),
+      );
+    });
+    visual.setData("decorTweens", tweens);
+  }
+
+  /** A pulsing golden ring behind the sprite standing in for a "glow" —
+   * a subtle dark edge ring sits just behind the saturated gold ring for
+   * contrast against the white tiles (a plain gold ring alone read as too
+   * washed out there). Both continuously scale/fade together, tracked in
+   * `decorTweens` for cleanup. */
+  private addWrappedGlow(visual: Phaser.GameObjects.Container): void {
+    const radius = PIECE_TARGET_SIZE * 0.44;
+    const edge = this.add.circle(0, 0, radius, 0x000000, 0).setStrokeStyle(5, THEME.wrappedGlowEdge, 0.4);
+    const ring = this.add.circle(0, 0, radius, 0x000000, 0).setStrokeStyle(4, THEME.wrappedGlow, 1);
+    visual.add(edge);
+    visual.add(ring);
+    const tween = this.tweens.add({
+      targets: [edge, ring],
+      scale: 1.25,
+      alpha: 0.4,
+      duration: 550,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.InOut",
+    });
+    visual.setData("decorTweens", [tween]);
+  }
+
+  /** Tiny desynced-per-cell bob loop — "engine idling" charm. Only animates
+   * local `y`, never `angle`, so it never fights the selection wiggle
+   * (which only animates `angle`) even when both run at once. */
+  private attachIdleMotion(visual: Phaser.GameObjects.Container, col: number, row: number): void {
+    const seed = (col * 131 + row * 977) % 997;
+    const tween = this.tweens.add({
+      targets: visual,
+      y: -1.6,
+      duration: 1500 + (seed % 7) * 110,
+      delay: seed % 500,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.InOut",
+    });
+    visual.setData("idleTween", tween);
+  }
+
+  private destroyCandy(container: Phaser.GameObjects.Container | null): void {
+    if (!container) {
+      return;
+    }
+    const visual = container.getData("visual") as Phaser.GameObjects.Container | undefined;
+    if (visual) {
+      this.tweens.killTweensOf(visual);
+      const decorTweens = visual.getData("decorTweens") as Phaser.Tweens.Tween[] | undefined;
+      decorTweens?.forEach((tween) => tween.stop());
+    }
+    container.destroy();
   }
 
   private cellCenter(col: number, row: number): { x: number; y: number } {
@@ -429,10 +601,10 @@ export class BoardScene extends Phaser.Scene {
   }
 
   /** Plays each activated special's distinct effect animation + sound
-   * concurrently: a row/column flash sweep for striped, an expanding ring
-   * for wrapped, per-candy zaps staggered across the cleared set for a
-   * color bomb (total stagger time capped so a huge bomb clear can't blow
-   * the ~4s budget). */
+   * concurrently: a lane-sweep flash (with a trailing motion-blur streak)
+   * for striped, an expanding "puff cloud" for wrapped, per-candy "beep"
+   * zaps staggered across the cleared set for a color bomb (total stagger
+   * time capped so a huge bomb clear can't blow the ~4s budget). */
   private async playActivations(activations: SpecialActivation[], scale: number): Promise<void> {
     await Promise.all(activations.map((activation) => this.playActivationEffect(activation, scale)));
   }
@@ -445,33 +617,63 @@ export class BoardScene extends Phaser.Scene {
       const horizontal = activation.special === "stripedH";
       const boardPixelW = BOARD_COLS * CELL_SIZE;
       const boardPixelH = BOARD_ROWS * CELL_SIZE;
+
+      const streak = this.add
+        .rectangle(
+          horizontal ? this.offsetX + boardPixelW / 2 : x,
+          horizontal ? y : this.offsetY + boardPixelH / 2,
+          horizontal ? boardPixelW : CELL_SIZE * 0.9,
+          horizontal ? CELL_SIZE * 0.9 : boardPixelH,
+          THEME.stripe,
+        )
+        .setAlpha(0)
+        .setDepth(7);
       const rect = this.add
         .rectangle(
           horizontal ? this.offsetX + boardPixelW / 2 : x,
           horizontal ? y : this.offsetY + boardPixelH / 2,
           horizontal ? boardPixelW : CELL_SIZE * 0.6,
           horizontal ? CELL_SIZE * 0.6 : boardPixelH,
-          STRIPE_COLOR,
+          THEME.pathColor,
         )
         .setAlpha(0)
         .setDepth(8);
+      this.boardLayer.add(streak);
       this.boardLayer.add(rect);
-      await this.tweenAsync({ targets: rect, alpha: 0.55, duration: ACTIVATION_DURATION * 0.35 * scale, yoyo: true });
+      await Promise.all([
+        this.tweenAsync({ targets: streak, alpha: 0.25, duration: ACTIVATION_DURATION * 0.45 * scale, yoyo: true }),
+        this.tweenAsync({ targets: rect, alpha: 0.6, duration: ACTIVATION_DURATION * 0.35 * scale, yoyo: true }),
+      ]);
+      streak.destroy();
       rect.destroy();
       return;
     }
 
     if (activation.special === "wrapped") {
       this.soundEngine.wrapped();
-      const ring = this.add.circle(x, y, CELL_SIZE * 0.3, 0x000000, 0).setStrokeStyle(4, WRAPPED_RING_COLOR).setDepth(8);
-      this.boardLayer.add(ring);
-      ring.setAlpha(1);
-      await this.tweenAsync({ targets: ring, scale: 2.2, alpha: 0, duration: ACTIVATION_DURATION * scale, ease: "Cubic.Out" });
-      ring.destroy();
+      const puffs: [number, number][] = [
+        [0, 0],
+        [10, -6],
+        [-10, -6],
+        [8, 8],
+        [-8, 8],
+      ];
+      const cloud = puffs.map(([dx, dy]) =>
+        this.add.circle(x + dx, y + dy, CELL_SIZE * 0.22, 0xffffff, 0.9).setDepth(8),
+      );
+      cloud.forEach((c) => this.boardLayer.add(c));
+      await this.tweenAsync({
+        targets: cloud,
+        scale: 2.4,
+        alpha: 0,
+        duration: ACTIVATION_DURATION * scale,
+        ease: "Cubic.Out",
+      });
+      cloud.forEach((c) => c.destroy());
       return;
     }
 
-    // bomb
+    // bomb — little "beep" sparkle zaps
     this.soundEngine.bomb();
     const cells = activation.cellsCleared;
     const perCellDelay = cells.length > 0 ? Math.min(30, BOMB_ZAP_TOTAL_MS / cells.length) * scale : 0;
@@ -481,12 +683,17 @@ export class BoardScene extends Phaser.Scene {
           new Promise<void>((resolve) => {
             this.time.delayedCall(i * perCellDelay, () => {
               const p = this.cellCenter(cell.col, cell.row);
-              const zap = this.add.circle(p.x, p.y, 6, 0xffffff).setAlpha(0.9).setDepth(8);
+              const zap = this.add.container(p.x, p.y).setDepth(8);
+              const barA = this.add.rectangle(0, 0, 12, 2.4, THEME.accent.primary);
+              const barB = this.add.rectangle(0, 0, 12, 2.4, THEME.accent.primary).setAngle(90);
+              zap.add([barA, barB]);
+              zap.setAlpha(0.95);
               this.boardLayer.add(zap);
               this.tweens.add({
                 targets: zap,
-                scale: 2,
+                scale: 1.8,
                 alpha: 0,
+                angle: 45,
                 duration: 180 * scale,
                 onComplete: () => {
                   zap.destroy();
@@ -510,17 +717,19 @@ export class BoardScene extends Phaser.Scene {
 
     await Promise.all(
       creations.map((creation) => {
-        const old = this.candyObjects[creation.cell.row]?.[creation.cell.col];
-        old?.destroy();
+        this.destroyCandy(this.candyObjects[creation.cell.row]?.[creation.cell.col] ?? null);
 
         const { x, y } = this.cellCenter(creation.cell.col, creation.cell.row);
-        const visual = this.drawCandyVisual(x, y, { type: creation.type, special: creation.special });
-        this.boardLayer.add(visual);
-        this.candyObjects[creation.cell.row][creation.cell.col] = visual;
-        visual.setScale(0.3);
+        const pieceContainer = this.drawCandyVisual(x, y, creation.cell.col, creation.cell.row, {
+          type: creation.type,
+          special: creation.special,
+        });
+        this.boardLayer.add(pieceContainer);
+        this.candyObjects[creation.cell.row][creation.cell.col] = pieceContainer;
+        pieceContainer.setScale(0.3);
 
-        return this.tweenAsync({ targets: visual, scale: 1.15, duration: SPECIAL_CREATED_DURATION, ease: "Back.Out" }).then(
-          () => this.tweenAsync({ targets: visual, scale: 1, duration: SPECIAL_CREATED_DURATION * 0.6 }),
+        return this.tweenAsync({ targets: pieceContainer, scale: 1.15, duration: SPECIAL_CREATED_DURATION, ease: "Back.Out" }).then(
+          () => this.tweenAsync({ targets: pieceContainer, scale: 1, duration: SPECIAL_CREATED_DURATION * 0.6 }),
         );
       }),
     );
@@ -541,7 +750,7 @@ export class BoardScene extends Phaser.Scene {
 
     for (const cell of cells) {
       const obj = this.candyObjects[cell.row]?.[cell.col];
-      obj?.destroy();
+      this.destroyCandy(obj ?? null);
       if (this.candyObjects[cell.row]) {
         this.candyObjects[cell.row][cell.col] = null;
       }
@@ -581,7 +790,7 @@ export class BoardScene extends Phaser.Scene {
         const { x, y } = this.cellCenter(spawn.cell.col, spawn.cell.row);
         const startY = this.offsetY - CELL_SIZE * (holeCount - spawn.cell.row);
         // Refill always spawns plain (non-special) candies, per spec.
-        const obj = this.drawCandyVisual(x, startY, { type: spawn.type, special: null });
+        const obj = this.drawCandyVisual(x, startY, spawn.cell.col, spawn.cell.row, { type: spawn.type, special: null });
         this.boardLayer.add(obj);
         this.candyObjects[spawn.cell.row][spawn.cell.col] = obj;
 
@@ -689,7 +898,7 @@ export class BoardScene extends Phaser.Scene {
     this.selected = cell;
     const { x, y } = this.cellCenter(cell.col, cell.row);
     const radius = (CELL_SIZE - CELL_PADDING * 2) / 2 + 4;
-    this.selectionRing = this.add.circle(x, y, radius).setStrokeStyle(3, SELECTION_COLOR);
+    this.selectionRing = this.add.circle(x, y, radius).setStrokeStyle(3, THEME.selectionRing);
     this.selectionTween = this.tweens.add({
       targets: this.selectionRing,
       scale: 1.15,
@@ -698,14 +907,50 @@ export class BoardScene extends Phaser.Scene {
       repeat: -1,
       ease: "Sine.InOut",
     });
+    this.startSelectionWiggle(cell);
   }
 
   private clearSelection(): void {
+    if (this.selected) {
+      this.stopSelectionWiggle(this.selected);
+    }
     this.selected = null;
     this.selectionTween?.stop();
     this.selectionTween = null;
     this.selectionRing?.destroy();
     this.selectionRing = null;
+  }
+
+  /** "Engine revving" tilt-wiggle layered on top of the selected piece's
+   * idle bob — only ever touches `angle`, so it never fights the idle
+   * loop's `y`-only bob even while both run simultaneously. */
+  private startSelectionWiggle(cell: Cell): void {
+    const container = this.candyObjects[cell.row]?.[cell.col];
+    const visual = container?.getData("visual") as Phaser.GameObjects.Container | undefined;
+    if (!visual) {
+      return;
+    }
+    const wiggle = this.tweens.add({
+      targets: visual,
+      angle: 7,
+      duration: 130,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.InOut",
+    });
+    visual.setData("wiggleTween", wiggle);
+  }
+
+  private stopSelectionWiggle(cell: Cell): void {
+    const container = this.candyObjects[cell.row]?.[cell.col];
+    const visual = container?.getData("visual") as Phaser.GameObjects.Container | undefined;
+    if (!visual) {
+      return;
+    }
+    const wiggle = visual.getData("wiggleTween") as Phaser.Tweens.Tween | undefined;
+    wiggle?.stop();
+    visual.setData("wiggleTween", undefined);
+    visual.angle = 0;
   }
 
   private resetHintTimer(): void {
@@ -756,9 +1001,10 @@ export class BoardScene extends Phaser.Scene {
   }
 
   /** Win -> Level Complete (stars animated in one by one, persisted via
-   * completeLevel + saveProgress right here); on the final level, a "you
-   * finished everything" state with only a Level Map button. Lose -> Out of
-   * Moves with Try Again + Level Map. Both keep the map always reachable. */
+   * completeLevel + saveProgress right here, confetti drop); on the final
+   * level, a "you finished everything" state with only a Level Map button.
+   * Lose -> Out of Moves with Try Again + Level Map. Both keep the map
+   * always reachable. */
   private showEndOverlay(): void {
     const level = this.gameState.level;
     const won = this.gameState.status === "won";
@@ -775,22 +1021,28 @@ export class BoardScene extends Phaser.Scene {
 
     const elements: Phaser.GameObjects.GameObject[] = [];
 
-    const backdrop = this.add.rectangle(centerX, centerY, this.scale.width, this.scale.height, 0x000000, 0.72);
+    const backdrop = this.add.rectangle(centerX, centerY, this.scale.width, this.scale.height, 0x4a3f5c, 0.55);
     elements.push(backdrop);
+
+    if (won) {
+      this.spawnConfetti();
+    }
 
     const panelHeight = won ? 300 : 210;
     const panelTop = centerY - panelHeight / 2;
-    const panel = this.add
-      .rectangle(centerX, centerY, 270, panelHeight, 0x2b2640, 0.97)
-      .setStrokeStyle(2, 0x6b4fbb);
-    elements.push(panel);
+    const panelGraphics = this.add.graphics().setDepth(20);
+    panelGraphics.fillStyle(THEME.overlayPanel.fill, 1);
+    panelGraphics.fillRoundedRect(centerX - 135, centerY - panelHeight / 2, 270, panelHeight, 20);
+    panelGraphics.lineStyle(3, THEME.overlayPanel.stroke, 1);
+    panelGraphics.strokeRoundedRect(centerX - 135, centerY - panelHeight / 2, 270, panelHeight, 20);
+    elements.push(panelGraphics);
 
     const title = won ? (isFinalLevel ? "All Levels Complete!" : `Level ${level.id} Complete!`) : "Out of Moves";
     const titleText = this.add
       .text(centerX, panelTop + 36, title, {
         fontFamily: "sans-serif",
         fontSize: isFinalLevel ? "20px" : "23px",
-        color: "#ffffff",
+        color: THEME.overlayPanel.text,
         fontStyle: "bold",
         align: "center",
         wordWrap: { width: 236 },
@@ -805,7 +1057,7 @@ export class BoardScene extends Phaser.Scene {
       .text(centerX, panelTop + (isFinalLevel ? 68 : 72), subtitle, {
         fontFamily: "sans-serif",
         fontSize: "16px",
-        color: "#e6e1f5",
+        color: THEME.overlayPanel.subtext,
       })
       .setOrigin(0.5);
     elements.push(subtitleText);
@@ -817,7 +1069,7 @@ export class BoardScene extends Phaser.Scene {
           .text(centerX + (i - 1) * 34, starY, "★", {
             fontFamily: "sans-serif",
             fontSize: "30px",
-            color: "#4a4560",
+            color: "#e4d7ba",
           })
           .setOrigin(0.5);
         elements.push(star);
@@ -833,9 +1085,9 @@ export class BoardScene extends Phaser.Scene {
 
     const primaryLabel = won ? (isFinalLevel ? "Level Map" : "Next Level") : "Try Again";
     const primaryY = panelTop + (won ? 160 : 110);
-    const primaryBg = this.add
-      .rectangle(centerX, primaryY, 180, 42, 0x6b4fbb)
-      .setStrokeStyle(2, 0xffffff)
+    const primaryButton = drawGlossyButton(this, centerX, primaryY, 180, 42, THEME.accent.primary, 0xffffff);
+    const primaryHit = this.add
+      .rectangle(centerX, primaryY, 180, 42, 0x000000, 0)
       .setInteractive({ useHandCursor: true });
     const primaryText = this.add
       .text(centerX, primaryY, primaryLabel, {
@@ -845,9 +1097,9 @@ export class BoardScene extends Phaser.Scene {
         fontStyle: "bold",
       })
       .setOrigin(0.5);
-    elements.push(primaryBg, primaryText);
+    elements.push(primaryButton, primaryHit, primaryText);
 
-    primaryBg.on("pointerup", () => {
+    primaryHit.on("pointerup", () => {
       if (won && isFinalLevel) {
         this.scene.start("LevelMapScene");
       } else if (won) {
@@ -859,21 +1111,43 @@ export class BoardScene extends Phaser.Scene {
 
     if (!(won && isFinalLevel)) {
       const secondaryY = primaryY + 54;
-      const secondaryBg = this.add
-        .rectangle(centerX, secondaryY, 180, 38, 0x3a3550)
-        .setStrokeStyle(2, 0x6b4fbb)
+      const secondaryButton = drawGlossyButton(this, centerX, secondaryY, 180, 38, 0xffffff, THEME.accent.primary);
+      const secondaryHit = this.add
+        .rectangle(centerX, secondaryY, 180, 38, 0x000000, 0)
         .setInteractive({ useHandCursor: true });
       const secondaryText = this.add
         .text(centerX, secondaryY, "Level Map", {
           fontFamily: "sans-serif",
           fontSize: "15px",
-          color: "#e6e1f5",
+          color: THEME.overlayPanel.text,
         })
         .setOrigin(0.5);
-      elements.push(secondaryBg, secondaryText);
-      secondaryBg.on("pointerup", () => this.scene.start("LevelMapScene"));
+      elements.push(secondaryButton, secondaryHit, secondaryText);
+      secondaryHit.on("pointerup", () => this.scene.start("LevelMapScene"));
     }
 
     this.add.container(0, 0, elements).setDepth(20);
+  }
+
+  /** Confetti recolored to the vehicle palette, falling behind the win
+   * panel (depth 19, just under the panel's depth 20). Fire-and-forget. */
+  private spawnConfetti(): void {
+    for (let i = 0; i < 26; i++) {
+      const x = Phaser.Math.Between(16, this.scale.width - 16);
+      const color = THEME.confetti[i % THEME.confetti.length];
+      const piece = this.add
+        .rectangle(x, -16, 6, 10, color)
+        .setDepth(19)
+        .setAngle(Phaser.Math.Between(0, 360));
+      this.tweens.add({
+        targets: piece,
+        y: this.scale.height + 20,
+        angle: piece.angle + Phaser.Math.Between(180, 540) * (i % 2 === 0 ? 1 : -1),
+        duration: Phaser.Math.Between(900, 1600),
+        delay: Phaser.Math.Between(0, 400),
+        ease: "Cubic.In",
+        onComplete: () => piece.destroy(),
+      });
+    }
   }
 }

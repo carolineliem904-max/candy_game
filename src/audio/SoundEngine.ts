@@ -14,56 +14,60 @@ export class SoundEngine {
     return this.muted;
   }
 
-  /** Short blip on a successful swap. */
+  /** Short blip on a successful swap — pitched up and shortened for
+   * SLICE 7's cuter vehicle theme. */
   swap(): void {
-    this.playTone(440, 0.08, { type: "triangle", gain: 0.14 });
+    this.playTone(560, 0.06, { type: "triangle", gain: 0.14 });
   }
 
   /** Low buzz on a rejected swap. */
   invalid(): void {
-    this.playTone(130, 0.16, { type: "sawtooth", gain: 0.1 });
+    this.playTone(150, 0.14, { type: "sawtooth", gain: 0.1 });
   }
 
   /** Clear pop — pitch rises with cascade depth (the classic "juicy" touch). */
   pop(cascadeStepNumber: number): void {
-    const freq = 300 + (cascadeStepNumber - 1) * 90;
-    this.playTone(freq, 0.13, { type: "square", gain: 0.11 });
+    const freq = 380 + (cascadeStepNumber - 1) * 100;
+    this.playTone(freq, 0.1, { type: "square", gain: 0.11 });
   }
 
   /** Short ascending arpeggio. */
   win(): void {
-    [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) =>
-      this.playTone(freq, 0.18, { type: "sine", gain: 0.14, startDelay: i * 0.09 }),
+    [659.25, 783.99, 987.77, 1318.5].forEach((freq, i) =>
+      this.playTone(freq, 0.15, { type: "sine", gain: 0.14, startDelay: i * 0.08 }),
     );
   }
 
   /** Short descending phrase. */
   lose(): void {
-    [523.25, 415.3, 349.23].forEach((freq, i) =>
-      this.playTone(freq, 0.22, { type: "triangle", gain: 0.13, startDelay: i * 0.12 }),
+    [587.33, 466.16, 392.0].forEach((freq, i) =>
+      this.playTone(freq, 0.18, { type: "triangle", gain: 0.13, startDelay: i * 0.1 }),
     );
   }
 
-  /** Quick rising "whoosh" for a striped candy's row/column sweep. */
+  /** Quick rising "whoosh" for a striped vehicle's lane sweep. */
   striped(): void {
-    this.playSweep(500, 900, 0.16, { type: "sawtooth", gain: 0.12 });
+    this.playSweep(600, 1050, 0.13, { type: "sawtooth", gain: 0.12 });
   }
 
-  /** Low "boom" for a wrapped candy's 3x3 explosion. */
+  /** Low "boom" for a wrapped vehicle's puff-cloud burst. */
   wrapped(): void {
-    this.playTone(140, 0.24, { type: "sine", gain: 0.2 });
-    this.playTone(220, 0.18, { type: "triangle", gain: 0.12, startDelay: 0.03 });
+    this.playTone(170, 0.2, { type: "sine", gain: 0.2 });
+    this.playTone(260, 0.14, { type: "triangle", gain: 0.12, startDelay: 0.03 });
   }
 
-  /** Bigger dramatic boom for a color bomb's board-wide clear. */
+  /** Bigger dramatic boom for the traffic-light bomb's board-wide clear. */
   bomb(): void {
-    this.playTone(90, 0.32, { type: "sawtooth", gain: 0.2 });
-    this.playSweep(700, 120, 0.28, { type: "square", gain: 0.1, startDelay: 0.02 });
+    this.playTone(100, 0.26, { type: "sawtooth", gain: 0.2 });
+    this.playSweep(800, 140, 0.22, { type: "square", gain: 0.1, startDelay: 0.02 });
   }
 
-  /** Bright little sparkle when a special candy is created. */
+  /** A soft two-note "beep beep" car-horn honk when a special candy is
+   * created — replaces the old plain sparkle per SLICE 7's theme pass. */
   specialCreated(): void {
-    [880, 1318.5].forEach((freq, i) => this.playTone(freq, 0.12, { type: "sine", gain: 0.13, startDelay: i * 0.06 }));
+    [740, 740].forEach((freq, i) =>
+      this.playTone(freq, 0.08, { type: "square", gain: 0.12, startDelay: i * 0.13 }),
+    );
   }
 
   private getContext(): AudioContext {

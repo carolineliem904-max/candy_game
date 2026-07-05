@@ -5,3 +5,6 @@ dist
 tsconfig.tsbuildinfo
 .vercel
 .env*
+
+# Raw sprite source drops (WhatsApp exports etc.) — clean copies live in public/vehicles/
+/car/
