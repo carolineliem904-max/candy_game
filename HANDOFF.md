@@ -830,6 +830,14 @@ Built by Caroline (product owner / QA) with Claude Code as builder.
   calls, and that the level-map scroll drag genuinely moves the camera (not just a static screenshot).
   **Not done this slice**: no numeric retuning beyond what's in the one `levels.ts` table — per spec,
   Caroline retunes after playtesting (see Open Questions).
+  **Committed and deployed**: staged explicitly by filename (not `git add -A`, to keep the untracked
+  `.claude/` local-tooling directory and `SLICE_8_SPEC.md` out of the commit — same "leave the spec
+  file for Caroline/Architect" precedent as SLICE 6B), committed (`e4b208c`) and pushed to `main`,
+  triggering the existing Vercel auto-deploy. Confirmed via `npx vercel ls` that the resulting
+  production deployment reached `Ready`, then confirmed the production alias
+  (candygame-six.vercel.app) serves the exact bundle hash (`index-DB9zxeiX.js`) produced by the local
+  build, with a final headless-Chromium pass against the *live* URL showing the level map (goal
+  badges included) loading cleanly with zero console errors.
 
 ## OPEN QUESTIONS
 - **SLICE 8's own "After Completion" ask, not yet done**: Caroline + son should playtest L1-L20 —
