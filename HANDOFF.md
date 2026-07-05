@@ -45,11 +45,13 @@ Built by Caroline (product owner / QA) with Claude Code as builder.
 
 ## STATUS
 - Current slice: SLICE 7 (vehicle theme/art pass, "Beep Beep!") — UI restyle and final custom sprite
-  set both approved by Caroline, speed-line alignment bug fixed, committed and pushed to `main`.
-  73/73 tests pass, build clean.
-- Deployed URL: https://candygame-six.vercel.app — pushed to `main`, Vercel auto-deploy should pick up
-  the new bundle shortly after the push; not yet independently re-verified against the live URL in
-  this session (see Open Questions).
+  set both approved by Caroline, speed-line alignment bug fixed, committed (`2e9851a`) and pushed to
+  `main`. 73/73 tests pass, build clean.
+- Deployed URL: https://candygame-six.vercel.app — confirmed live and matching: the production alias
+  serves bundle `index-CHEBMgch.js`, identical to the local build, and a headless-Chromium pass
+  against the live URL loaded the level map (mascot bubble, restyled nodes/background) with zero
+  console errors. Only remaining item is Caroline's son's actual playtest verdict — see Open
+  Questions.
 
 ## DECISIONS LOG
 - 2026-07-03: Stack locked (Phaser 3 + TS + Vite). Logic/render separation mandated.
@@ -732,12 +734,10 @@ Built by Caroline (product owner / QA) with Claude Code as builder.
   alignment fixes), pushed to `main`, triggering the existing Vercel auto-deploy.
 
 ## OPEN QUESTIONS
-- **SLICE 7 committed and pushed — one thing left before calling it fully done**: confirm the Vercel
-  auto-deploy actually picked up the new bundle (including `public/vehicles/**`) against the live URL,
-  and get Caroline's son's actual playtest verdict — the spec's own literal acceptance test for this
-  slice, still not collected. The UI restyle and final custom sprite set are both approved; the raw
-  `car/` source folder is gitignored; the asset pipeline (`public/vehicles/*.png`, `PreloadScene`) is
-  loading her real sprites correctly per the latest DECISIONS LOG entries.
+- **SLICE 7 shipped; one thing left**: get Caroline's son's actual playtest verdict — the spec's own
+  literal acceptance test for this slice, still not collected. Everything else is done: UI restyle and
+  final custom sprite set both approved, speed-line alignment fixed, committed (`2e9851a`), pushed,
+  and confirmed live at https://candygame-six.vercel.app with zero console errors.
 - Final game name: "Beep Beep!" shipped as-is in SLICE 7 (the spec's working title) — repo/URL
   renaming was explicitly out of scope for SLICE 7 and stays cosmetic/later per that spec.
 - Per SLICE 6B's spec ("After Completion"): Caroline should replay L1-L10 for the real difficulty
