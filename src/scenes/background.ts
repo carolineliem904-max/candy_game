@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { THEME } from "./theme";
+import { UI_SCALE } from "./layout";
 
 /** Shared "pastel sky + soft city-and-road scene" background, used by both
  * `BoardScene` and `LevelMapScene` so the two never drift into looking like
@@ -18,9 +19,9 @@ export function drawSkyBackground(scene: Phaser.Scene, w: number, h: number): vo
 
   const hills = scene.add.graphics();
   hills.fillStyle(THEME.hills.back, 0.9);
-  hills.fillEllipse(w * 0.22, h - 34, w * 0.9, 80);
+  hills.fillEllipse(w * 0.22, h - 34 * UI_SCALE, w * 0.9, 80 * UI_SCALE);
   hills.fillStyle(THEME.hills.front, 0.9);
-  hills.fillEllipse(w * 0.78, h - 26, w * 1.05, 90);
+  hills.fillEllipse(w * 0.78, h - 26 * UI_SCALE, w * 1.05, 90 * UI_SCALE);
 
   drawRoad(scene, w, h);
 }
@@ -31,35 +32,35 @@ export function drawSkyBackground(scene: Phaser.Scene, w: number, h: number): vo
 function drawSkyline(scene: Phaser.Scene, w: number, h: number): void {
   const skyline = scene.add.graphics();
   skyline.fillStyle(THEME.skyline, 0.45);
-  const bandBottom = h - 92;
+  const bandBottom = h - 92 * UI_SCALE;
   const buildings: { xf: number; wf: number; height: number }[] = [
-    { xf: 0.04, wf: 0.09, height: 42 },
-    { xf: 0.15, wf: 0.07, height: 26 },
-    { xf: 0.24, wf: 0.1, height: 56 },
-    { xf: 0.6, wf: 0.08, height: 34 },
-    { xf: 0.7, wf: 0.11, height: 54 },
-    { xf: 0.85, wf: 0.08, height: 30 },
+    { xf: 0.04, wf: 0.09, height: 42 * UI_SCALE },
+    { xf: 0.15, wf: 0.07, height: 26 * UI_SCALE },
+    { xf: 0.24, wf: 0.1, height: 56 * UI_SCALE },
+    { xf: 0.6, wf: 0.08, height: 34 * UI_SCALE },
+    { xf: 0.7, wf: 0.11, height: 54 * UI_SCALE },
+    { xf: 0.85, wf: 0.08, height: 30 * UI_SCALE },
   ];
   for (const b of buildings) {
     const bw = w * b.wf;
     const bx = w * b.xf;
-    skyline.fillRoundedRect(bx, bandBottom - b.height, bw, b.height, 4);
+    skyline.fillRoundedRect(bx, bandBottom - b.height, bw, b.height, 4 * UI_SCALE);
   }
 }
 
 /** A thin literal "road" at the very bottom of the canvas with a dashed
  * centerline — mostly visible in the new footer strip below the board. */
 function drawRoad(scene: Phaser.Scene, w: number, h: number): void {
-  const roadHeight = 26;
+  const roadHeight = 26 * UI_SCALE;
   const road = scene.add.graphics();
   road.fillStyle(THEME.road.surface, 1);
   road.fillRect(0, h - roadHeight, w, roadHeight);
 
   road.fillStyle(THEME.road.dash, 0.9);
-  const dashWidth = 14;
-  const gap = 10;
-  for (let x = 6; x < w; x += dashWidth + gap) {
-    road.fillRect(x, h - roadHeight / 2 - 1.5, dashWidth, 3);
+  const dashWidth = 14 * UI_SCALE;
+  const gap = 10 * UI_SCALE;
+  for (let x = 6 * UI_SCALE; x < w; x += dashWidth + gap) {
+    road.fillRect(x, h - roadHeight / 2 - 1.5 * UI_SCALE, dashWidth, 3 * UI_SCALE);
   }
 }
 
@@ -74,6 +75,6 @@ function drawCloud(scene: Phaser.Scene, x: number, y: number, scale: number): vo
     [-15, 3, 5],
   ];
   for (const [dx, dy, r] of puffs) {
-    g.fillCircle(x + dx * scale, y + dy * scale, r * scale);
+    g.fillCircle(x + dx * scale * UI_SCALE, y + dy * scale * UI_SCALE, r * scale * UI_SCALE);
   }
 }

@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { UI_SCALE } from "./layout";
 
 /** A rounded, glossy button body: soft drop shadow, filled rounded rect
  * (or a perfect circle when `w === h`), border, and a cheap highlight
@@ -20,11 +21,11 @@ export function drawGlossyButton(
   const radius = h / 2;
 
   g.fillStyle(0x000000, 0.12);
-  g.fillRoundedRect(x - w / 2, y - h / 2 + 3, w, h, radius);
+  g.fillRoundedRect(x - w / 2, y - h / 2 + 3 * UI_SCALE, w, h, radius);
 
   g.fillStyle(fillColor, 1);
   g.fillRoundedRect(x - w / 2, y - h / 2, w, h, radius);
-  g.lineStyle(2, borderColor, 1);
+  g.lineStyle(2 * UI_SCALE, borderColor, 1);
   g.strokeRoundedRect(x - w / 2, y - h / 2, w, h, radius);
 
   g.fillStyle(0xffffff, 0.3);

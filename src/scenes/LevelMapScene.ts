@@ -5,11 +5,19 @@ import type { LevelDef } from "../logic/LevelDef";
 import { loadProgress } from "../storage/progressStorage";
 import { THEME } from "./theme";
 import { drawSkyBackground } from "./background";
+import { UI_SCALE } from "./layout";
 
-const NODE_RADIUS = 16;
-const NODE_SPACING = 36;
-const TOP_MARGIN = 60;
-const ZIGZAG_OFFSET = 54;
+/** All pixel-based constants below are scaled by `UI_SCALE` (see layout.ts)
+ * because `this.scale.width`/`height` — used throughout this scene for
+ * centering — now report the backing-store size (already UI_SCALE times
+ * bigger for Retina sharpness), not the original design size. A literal
+ * left unscaled here would render at half its intended size relative to
+ * everything else on Retina, and (worse) tap-hit math against `x`/`y` built
+ * from a mix of scaled and unscaled numbers would land in the wrong place. */
+const NODE_RADIUS = 16 * UI_SCALE;
+const NODE_SPACING = 36 * UI_SCALE;
+const TOP_MARGIN = 60 * UI_SCALE;
+const ZIGZAG_OFFSET = 54 * UI_SCALE;
 const PATH_COLOR = THEME.pathColor;
 const TIRE_COLOR = 0x2b2f36;
 const LOCKED_COLOR = 0xc9c2b3;
@@ -17,7 +25,11 @@ const UNLOCKED_COLOR = THEME.accent.primary;
 const COMPLETED_COLOR = THEME.accent.secondary;
 /** Minimum pointer movement (px) before a gesture counts as a scroll drag
  * rather than a node tap — mirrors BoardScene's DRAG_THRESHOLD pattern. */
-const SCROLL_DRAG_THRESHOLD = 6;
+const SCROLL_DRAG_THRESHOLD = 6 * UI_SCALE;
+
+function px(size: number): string {
+  return `${size * UI_SCALE}px`;
+}
 
 /** The always-reachable start screen: a winding path of level nodes, each
  * drawn as a little wheel (dark tire ring + colored hub) instead of a plain
@@ -47,25 +59,25 @@ export class LevelMapScene extends Phaser.Scene {
       y: TOP_MARGIN + index * NODE_SPACING,
     }));
     const lastY = positions[positions.length - 1].y;
-    const mascotY = lastY + 62;
+    const mascotY = lastY + 62 * UI_SCALE;
     // The whole scene (background included) is drawn at full content height
     // and scrolls together as one piece — simpler and more thematic (a long
     // winding road) than pinning a fixed header/background layer.
-    const contentHeight = Math.max(mascotY + 50, this.scale.height);
+    const contentHeight = Math.max(mascotY + 50 * UI_SCALE, this.scale.height);
 
     drawSkyBackground(this, this.scale.width, contentHeight);
 
     this.add
-      .text(centerX, 24, "Select Level", {
+      .text(centerX, 24 * UI_SCALE, "Select Level", {
         fontFamily: "sans-serif",
-        fontSize: "19px",
+        fontSize: px(19),
         color: "#3d2b1f",
         fontStyle: "bold",
       })
       .setOrigin(0.5);
 
     const path = this.add.graphics();
-    path.lineStyle(4, PATH_COLOR, 0.9);
+    path.lineStyle(4 * UI_SCALE, PATH_COLOR, 0.9);
     for (let i = 0; i < positions.length - 1; i++) {
       path.beginPath();
       path.moveTo(positions[i].x, positions[i].y);
@@ -128,39 +140,39 @@ export class LevelMapScene extends Phaser.Scene {
   /** Small charm, visual only: a mascot + speech bubble in the footer strip
    * below the last node, nudging new players toward the core mechanic. */
   private drawMascotBubble(centerX: number, lastNodeY: number): void {
-    const y = lastNodeY + 62;
-    const bubbleW = 250;
-    const bubbleH = 46;
-    const mascotX = centerX - bubbleW / 2 - 4;
+    const y = lastNodeY + 62 * UI_SCALE;
+    const bubbleW = 250 * UI_SCALE;
+    const bubbleH = 46 * UI_SCALE;
+    const mascotX = centerX - bubbleW / 2 - 4 * UI_SCALE;
 
-    this.add.text(mascotX, y, "🚗", { fontSize: "26px" }).setOrigin(0.5);
+    this.add.text(mascotX, y, "🚗", { fontSize: px(26) }).setOrigin(0.5);
 
-    const bubbleX = centerX + 14;
+    const bubbleX = centerX + 14 * UI_SCALE;
     const g = this.add.graphics();
     g.fillStyle(0x000000, 0.08);
-    g.fillRoundedRect(bubbleX - bubbleW / 2, y - bubbleH / 2 + 3, bubbleW, bubbleH, bubbleH / 2);
+    g.fillRoundedRect(bubbleX - bubbleW / 2, y - bubbleH / 2 + 3 * UI_SCALE, bubbleW, bubbleH, bubbleH / 2);
     g.fillStyle(THEME.hud.chip, 1);
     g.fillRoundedRect(bubbleX - bubbleW / 2, y - bubbleH / 2, bubbleW, bubbleH, bubbleH / 2);
-    g.lineStyle(2, THEME.hud.chipStroke, 1);
+    g.lineStyle(2 * UI_SCALE, THEME.hud.chipStroke, 1);
     g.strokeRoundedRect(bubbleX - bubbleW / 2, y - bubbleH / 2, bubbleW, bubbleH, bubbleH / 2);
     // little pointer tail toward the mascot
     g.fillStyle(THEME.hud.chip, 1);
     g.fillTriangle(
-      bubbleX - bubbleW / 2 + 2,
-      y - 6,
-      bubbleX - bubbleW / 2 + 2,
-      y + 6,
-      bubbleX - bubbleW / 2 - 9,
+      bubbleX - bubbleW / 2 + 2 * UI_SCALE,
+      y - 6 * UI_SCALE,
+      bubbleX - bubbleW / 2 + 2 * UI_SCALE,
+      y + 6 * UI_SCALE,
+      bubbleX - bubbleW / 2 - 9 * UI_SCALE,
       y,
     );
-    g.lineStyle(2, THEME.hud.chipStroke, 1);
-    g.lineBetween(bubbleX - bubbleW / 2 + 2, y - 6, bubbleX - bubbleW / 2 - 9, y);
-    g.lineBetween(bubbleX - bubbleW / 2 + 2, y + 6, bubbleX - bubbleW / 2 - 9, y);
+    g.lineStyle(2 * UI_SCALE, THEME.hud.chipStroke, 1);
+    g.lineBetween(bubbleX - bubbleW / 2 + 2 * UI_SCALE, y - 6 * UI_SCALE, bubbleX - bubbleW / 2 - 9 * UI_SCALE, y);
+    g.lineBetween(bubbleX - bubbleW / 2 + 2 * UI_SCALE, y + 6 * UI_SCALE, bubbleX - bubbleW / 2 - 9 * UI_SCALE, y);
 
     this.add
       .text(bubbleX, y, "Match 3 or more vehicles\nto clear them!", {
         fontFamily: "sans-serif",
-        fontSize: "11px",
+        fontSize: px(11),
         color: THEME.hud.text,
         fontStyle: "bold",
         align: "center",
@@ -177,15 +189,15 @@ export class LevelMapScene extends Phaser.Scene {
     const hubColor = !unlocked ? LOCKED_COLOR : stars > 0 ? COMPLETED_COLOR : UNLOCKED_COLOR;
 
     // Tire (dark ring) + hub (colored disc) reads as a little wheel.
-    const tire = this.add.circle(x, y, NODE_RADIUS, TIRE_COLOR).setStrokeStyle(2, 0x14161a);
+    const tire = this.add.circle(x, y, NODE_RADIUS, TIRE_COLOR).setStrokeStyle(2 * UI_SCALE, 0x14161a);
     const hub = this.add
-      .circle(x, y, NODE_RADIUS - 6, hubColor)
-      .setStrokeStyle(2, 0xffffff, unlocked ? 0.9 : 0.4);
+      .circle(x, y, NODE_RADIUS - 6 * UI_SCALE, hubColor)
+      .setStrokeStyle(2 * UI_SCALE, 0xffffff, unlocked ? 0.9 : 0.4);
 
     this.add
       .text(x, y, unlocked ? String(levelId) : "🔒", {
         fontFamily: "sans-serif",
-        fontSize: unlocked ? "13px" : "11px",
+        fontSize: unlocked ? px(13) : px(11),
         color: "#ffffff",
         fontStyle: "bold",
       })
@@ -196,15 +208,15 @@ export class LevelMapScene extends Phaser.Scene {
     // glance without opening each one.
     const badgeX = x + NODE_RADIUS * 0.75;
     const badgeY = y - NODE_RADIUS * 0.75;
-    this.add.circle(badgeX, badgeY, 9, 0xffffff, 0.95).setStrokeStyle(1.5, THEME.hud.chipStroke, 0.8);
-    this.add.text(badgeX, badgeY, THEME.goalBadge[level.goal.kind], { fontSize: "10px" }).setOrigin(0.5);
+    this.add.circle(badgeX, badgeY, 9 * UI_SCALE, 0xffffff, 0.95).setStrokeStyle(1.5 * UI_SCALE, THEME.hud.chipStroke, 0.8);
+    this.add.text(badgeX, badgeY, THEME.goalBadge[level.goal.kind], { fontSize: px(10) }).setOrigin(0.5);
 
     if (unlocked && stars > 0) {
       const starChars = "★★★".slice(0, stars) + "☆☆☆".slice(0, 3 - stars);
       this.add
-        .text(x, y + NODE_RADIUS + 9, starChars, {
+        .text(x, y + NODE_RADIUS + 9 * UI_SCALE, starChars, {
           fontFamily: "sans-serif",
-          fontSize: "10px",
+          fontSize: px(10),
           color: "#ffd700",
         })
         .setOrigin(0.5);

@@ -838,6 +838,59 @@ Built by Caroline (product owner / QA) with Claude Code as builder.
   (candygame-six.vercel.app) serves the exact bundle hash (`index-DB9zxeiX.js`) produced by the local
   build, with a final headless-Chromium pass against the *live* URL showing the level map (goal
   badges included) loading cleanly with zero console errors.
+- 2026-07-06: **Retina/high-DPI blur fix — sprites (and everything else) render sharp on real
+  Retina displays.** Caroline reported the pixelation persisted after SLICE 8's Checkpoint 0
+  (which had correctly found "nothing to fix" — `pixelArt: true` really was already gone). The
+  actual cause was a different, unrelated bug: headless Chromium defaults to `deviceScaleFactor: 1`,
+  so every prior verification pass in this project never rendered at a real device pixel ratio,
+  masking it completely. Diagnosed methodically per Caroline's explicit 3-point checklist, each
+  confirmed/ruled out with direct runtime measurement rather than assumption:
+  **(1) devicePixelRatio — confirmed as the cause.** Measured with Playwright's
+  `deviceScaleFactor: 2`: canvas backing store was 368×502 physical pixels, exactly equal to its
+  CSS display size, while `devicePixelRatio` was 2 — the canvas renders at half the pixel density
+  the screen needs, so the whole thing blurs when the browser stretches it across the real pixels.
+  **(2) Texture filter — ruled out.** Queried the live WebGL texture's actual `gl.TEXTURE_MAG_FILTER`/
+  `MIN_FILTER` values directly (not just Phaser's config flag): both `9729` (`gl.LINEAR`), not
+  `gl.NEAREST`.
+  **(3) Trimmed PNGs — ruled out.** Source files unchanged, still 250-360px against a ~31px render
+  target.
+  **The straightforward fix doesn't exist in Phaser 3.90**: the old global `resolution` config was
+  removed entirely (confirmed by grepping the bundled source — nothing reads that key anymore), and
+  `scale.zoom` under `Phaser.Scale.FIT` does the opposite of what's needed (enlarges the CSS display
+  size, leaves the backing store fixed) — confirmed both by tracing `ScaleManager.updateScale()` and
+  by testing it live (zero effect). **The combination that works, verified empirically**:
+  `Phaser.Scale.NONE` (whose backing store is set once from the raw config width/height and never
+  touched again) + `zoom` (which, only under `NONE`, scales CSS size independently via
+  `ScaleManager.setZoom`, callable any time post-boot) — so every pixel constant across
+  `layout.ts`/`BoardScene.ts`/`LevelMapScene.ts`/`background.ts`/`uiKit.ts`/`PreloadScene.ts` is now
+  scaled by a new `UI_SCALE = devicePixelRatio` (bigger backing store), and `main.ts` sets
+  `zoom: 1/UI_SCALE` to bring the CSS size back down to the original design size. `NONE` mode has no
+  built-in "shrink to fit a narrow viewport" behavior (unlike the `FIT` mode it replaces), so
+  `main.ts` re-derives and re-applies `zoom` on load and on window resize (`DESIGN_WIDTH`/
+  `DESIGN_HEIGHT`, new layout.ts exports) to restore that responsiveness without reintroducing the
+  original bug. One non-obvious follow-up bug caught during verification, not anticipated up front:
+  `this.scale.width`/`height` (used throughout `BoardScene`/`LevelMapScene` for centering) now report
+  the bigger backing-store size, so every *other* standalone pixel literal in those files (node
+  radius/spacing, HUD pill dimensions, font sizes, panel sizes, particle offsets — everything not
+  already derived from a `layout.ts` constant) had to be scaled by the same `UI_SCALE` too, or tap
+  coordinates and visual proportions would drift out of sync with the bigger logical space. Caught
+  this exact failure mode live: a real simulated node tap that used to work stopped registering
+  until `LevelMapScene`'s own constants were scaled to match.
+  **Verification**: 114/114 tests pass unchanged (`UI_SCALE` falls back to 1 outside a browser, so
+  the logic layer and Vitest are unaffected), build clean. Empirically verified every claim rather
+  than trusting the reasoning alone: canvas backing store confirmed 736×1004 physical px at
+  `devicePixelRatio: 2` while CSS display size stayed 368×502 (matching the pre-fix size exactly);
+  confirmed `devicePixelRatio: 1` (non-Retina) behavior is byte-identical to before (368×368,
+  `UI_SCALE` is 1); confirmed the responsive shrink still works on a narrow 320px viewport (canvas
+  shrinks to fit with zero horizontal overflow, backing store stays full-resolution); ran a real
+  before/after close-up crop of the same vehicle at `deviceScaleFactor: 2` showing visibly sharper
+  edges and finer shading detail after the fix; drove **real** simulated pointer events (not
+  debug-hook calls) through every input path — a level-map node tap, a tap-tap board swap, a
+  drag-swap, and a level-map scroll-drag — confirming each one still hits exactly the right
+  cell/node under the new coordinate scale, with moves consumed exactly once per successful swap.
+  Zero console errors across every pass.
+  **Not committed as part of SLICE 8's original commit** — this is a same-day follow-up fix layered
+  on top; see the next entry for the commit/deploy confirmation.
 
 ## OPEN QUESTIONS
 - **SLICE 8's own "After Completion" ask, not yet done**: Caroline + son should playtest L1-L20 —

@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { VEHICLE_ASSET_LIST } from "./theme";
-import { GAME_HEIGHT, GAME_WIDTH } from "./layout";
+import { GAME_HEIGHT, GAME_WIDTH, UI_SCALE } from "./layout";
 import { THEME } from "./theme";
 
 /** Minimal loading state: a road-colored bar fills in as the 7 sprites
@@ -19,20 +19,20 @@ export class PreloadScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor(THEME.sky.top);
 
     this.add
-      .text(centerX, centerY - 30, "Beep Beep!", {
+      .text(centerX, centerY - 30 * UI_SCALE, "Beep Beep!", {
         fontFamily: "sans-serif",
-        fontSize: "22px",
+        fontSize: `${22 * UI_SCALE}px`,
         color: "#ffffff",
         fontStyle: "bold",
       })
       .setOrigin(0.5);
 
-    const barWidth = 160;
+    const barWidth = 160 * UI_SCALE;
     const barBg = this.add
-      .rectangle(centerX, centerY + 10, barWidth, 14, 0xffffff, 0.35)
-      .setStrokeStyle(2, 0xffffff);
+      .rectangle(centerX, centerY + 10 * UI_SCALE, barWidth, 14 * UI_SCALE, 0xffffff, 0.35)
+      .setStrokeStyle(2 * UI_SCALE, 0xffffff);
     const barFill = this.add
-      .rectangle(centerX - barWidth / 2, centerY + 10, 1, 10, THEME.pathColor)
+      .rectangle(centerX - barWidth / 2, centerY + 10 * UI_SCALE, 1, 10 * UI_SCALE, THEME.pathColor)
       .setOrigin(0, 0.5);
 
     this.load.on("progress", (fraction: number) => {

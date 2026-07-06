@@ -8,7 +8,7 @@ import { getLevelById, LEVEL_COUNT } from "../logic/levels";
 import { scoreForStep } from "../logic/ScoreRules";
 import { SoundEngine } from "../audio/SoundEngine";
 import { loadProgress, saveProgress } from "../storage/progressStorage";
-import { BOARD_MARGIN, CELL_PADDING, CELL_SIZE, DRAG_THRESHOLD, HUD_HEIGHT } from "./layout";
+import { BOARD_MARGIN, CELL_PADDING, CELL_SIZE, DRAG_THRESHOLD, HUD_HEIGHT, UI_SCALE } from "./layout";
 import { PARTICLE_COLORS, TRAFFIC_LIGHT_ASSET, THEME, VEHICLE_ASSETS, type VehicleAsset } from "./theme";
 import { drawSkyBackground } from "./background";
 import { drawGlossyButton } from "./uiKit";
@@ -20,7 +20,17 @@ import { drawGlossyButton } from "./uiKit";
  * it came out to ~37px against a 36px tile — a hair too big, leaving zero
  * clearance for the speed-line decoration beside a striped piece and
  * making the lines read as misaligned/overlapping the sprite. */
-const TILE_SIZE = CELL_SIZE - 8;
+const TILE_SIZE = CELL_SIZE - 8 * UI_SCALE;
+
+/** Font-size helper: every literal pixel size in this file (radii, offsets,
+ * stroke widths, font sizes) needs the same `UI_SCALE` factor CELL_SIZE
+ * already carries (see layout.ts) since `this.scale.width`/`height` (used
+ * for centering throughout this scene) now report the backing-store size,
+ * not the original design size — an unscaled literal would render at half
+ * its intended size on Retina relative to everything else. */
+function px(size: number): string {
+  return `${size * UI_SCALE}px`;
+}
 
 /** ~85% of the tile width. Was 0.68, but that ratio was tuned before the
  * vehicle PNGs had their transparent margins trimmed — once trimmed, the
@@ -152,13 +162,13 @@ export class BoardScene extends Phaser.Scene {
 
     const shadow = this.add.graphics();
     shadow.fillStyle(0x000000, 0.1);
-    shadow.fillRoundedRect(panelX, panelY + 5, panelSize, panelSize, 16);
+    shadow.fillRoundedRect(panelX, panelY + 5 * UI_SCALE, panelSize, panelSize, 16 * UI_SCALE);
 
     const g = this.add.graphics();
     g.fillStyle(THEME.boardPanel.fill, 1);
-    g.fillRoundedRect(panelX, panelY, panelSize, panelSize, 16);
-    g.lineStyle(3, THEME.boardPanel.stroke, 1);
-    g.strokeRoundedRect(panelX, panelY, panelSize, panelSize, 16);
+    g.fillRoundedRect(panelX, panelY, panelSize, panelSize, 16 * UI_SCALE);
+    g.lineStyle(3 * UI_SCALE, THEME.boardPanel.stroke, 1);
+    g.strokeRoundedRect(panelX, panelY, panelSize, panelSize, 16 * UI_SCALE);
   }
 
   /** A light rounded tile behind every cell (drawn once, outside
@@ -166,7 +176,7 @@ export class BoardScene extends Phaser.Scene {
    * white-tile match-3 backing, with a small gap between tiles and a very
    * soft shadow for a touch of depth. */
   private drawTiles(): void {
-    const radius = 8;
+    const radius = 8 * UI_SCALE;
     const g = this.add.graphics();
     for (let row = 0; row < BOARD_ROWS; row++) {
       for (let col = 0; col < BOARD_COLS; col++) {
@@ -174,10 +184,10 @@ export class BoardScene extends Phaser.Scene {
         const left = x - TILE_SIZE / 2;
         const top = y - TILE_SIZE / 2;
         g.fillStyle(THEME.tile.shadow, 0.35);
-        g.fillRoundedRect(left, top + 1.5, TILE_SIZE, TILE_SIZE, radius);
+        g.fillRoundedRect(left, top + 1.5 * UI_SCALE, TILE_SIZE, TILE_SIZE, radius);
         g.fillStyle(THEME.tile.fill, 1);
         g.fillRoundedRect(left, top, TILE_SIZE, TILE_SIZE, radius);
-        g.lineStyle(1.5, THEME.tile.stroke, 1);
+        g.lineStyle(1.5 * UI_SCALE, THEME.tile.stroke, 1);
         g.strokeRoundedRect(left, top, TILE_SIZE, TILE_SIZE, radius);
       }
     }
@@ -209,7 +219,7 @@ export class BoardScene extends Phaser.Scene {
     const radius = TILE_SIZE * 0.4;
     const blob = this.add
       .circle(0, 0, radius, THEME.jelly.fill, 0.55)
-      .setStrokeStyle(2, THEME.jelly.stroke, 0.8);
+      .setStrokeStyle(2 * UI_SCALE, THEME.jelly.stroke, 0.8);
     container.add(blob);
 
     const seed = (col * 131 + row * 977) % 997;
@@ -256,39 +266,39 @@ export class BoardScene extends Phaser.Scene {
    * the old two-line plain-text HUD. */
   private createHud(): void {
     const centerX = this.scale.width / 2;
-    const pillW = 260;
-    const pillH = 58;
-    const pillY = 6;
+    const pillW = 260 * UI_SCALE;
+    const pillH = 58 * UI_SCALE;
+    const pillY = 6 * UI_SCALE;
     const pillX = centerX - pillW / 2;
 
     const shadow = this.add.graphics();
     shadow.fillStyle(0x000000, 0.1);
-    shadow.fillRoundedRect(pillX, pillY + 3, pillW, pillH, pillH / 2);
+    shadow.fillRoundedRect(pillX, pillY + 3 * UI_SCALE, pillW, pillH, pillH / 2);
 
     const chip = this.add.graphics();
     chip.fillStyle(THEME.hud.chip, 1);
     chip.fillRoundedRect(pillX, pillY, pillW, pillH, pillH / 2);
-    chip.lineStyle(2, THEME.hud.chipStroke, 1);
+    chip.lineStyle(2 * UI_SCALE, THEME.hud.chipStroke, 1);
     chip.strokeRoundedRect(pillX, pillY, pillW, pillH, pillH / 2);
 
     const segW = pillW / 3;
-    chip.lineStyle(2, THEME.hud.chipStroke, 0.5);
-    chip.lineBetween(pillX + segW, pillY + 10, pillX + segW, pillY + pillH - 10);
-    chip.lineBetween(pillX + segW * 2, pillY + 10, pillX + segW * 2, pillY + pillH - 10);
+    chip.lineStyle(2 * UI_SCALE, THEME.hud.chipStroke, 0.5);
+    chip.lineBetween(pillX + segW, pillY + 10 * UI_SCALE, pillX + segW, pillY + pillH - 10 * UI_SCALE);
+    chip.lineBetween(pillX + segW * 2, pillY + 10 * UI_SCALE, pillX + segW * 2, pillY + pillH - 10 * UI_SCALE);
 
     const segCenterX = (i: number) => pillX + segW * i + segW / 2;
-    const labelY = pillY + 13;
-    const numberY = pillY + 35;
+    const labelY = pillY + 13 * UI_SCALE;
+    const numberY = pillY + 35 * UI_SCALE;
 
     const labelStyle: Phaser.Types.GameObjects.Text.TextStyle = {
       fontFamily: "sans-serif",
-      fontSize: "10px",
+      fontSize: px(10),
       color: THEME.hud.label,
       fontStyle: "bold",
     };
     const numberStyle: Phaser.Types.GameObjects.Text.TextStyle = {
       fontFamily: "sans-serif",
-      fontSize: "20px",
+      fontSize: px(20),
       fontStyle: "bold",
     };
 
@@ -323,7 +333,7 @@ export class BoardScene extends Phaser.Scene {
       this.add.text(segX, labelY, "SCORE", labelStyle).setOrigin(0.5);
       this.scoreText = this.add.text(segX, numberY, "0", { ...numberStyle, color: THEME.hudNumbers.score }).setOrigin(0.5);
       this.scoreTargetText = this.add
-        .text(segX, numberY + 15, "", { fontFamily: "sans-serif", fontSize: "9px", color: THEME.hud.label })
+        .text(segX, numberY + 15 * UI_SCALE, "", { fontFamily: "sans-serif", fontSize: px(9), color: THEME.hud.label })
         .setOrigin(0.5);
       return;
     }
@@ -332,33 +342,33 @@ export class BoardScene extends Phaser.Scene {
       this.add.text(segX, labelY, "JELLY", labelStyle).setOrigin(0.5);
       this.scoreText = this.add.text(segX, numberY, "0", { ...numberStyle, color: THEME.hudNumbers.score }).setOrigin(0.5);
       this.scoreTargetText = this.add
-        .text(segX, numberY + 15, "left", { fontFamily: "sans-serif", fontSize: "9px", color: THEME.hud.label })
+        .text(segX, numberY + 15 * UI_SCALE, "left", { fontFamily: "sans-serif", fontSize: px(9), color: THEME.hud.label })
         .setOrigin(0.5);
       return;
     }
 
     this.add.text(segX, labelY, "COLLECT", labelStyle).setOrigin(0.5);
     const types = Object.keys(goal.pieces).map(Number) as CandyType[];
-    const spacing = 30;
+    const spacing = 30 * UI_SCALE;
     const startX = segX - ((types.length - 1) * spacing) / 2;
     this.collectIcons = types.map((type, i) => {
       const iconX = startX + i * spacing;
       const asset = VEHICLE_ASSETS[type];
-      const iconScale = 18 / Math.max(asset.width, asset.height);
-      this.add.image(iconX, numberY - 4, asset.key).setDisplaySize(asset.width * iconScale, asset.height * iconScale);
+      const iconScale = (18 * UI_SCALE) / Math.max(asset.width, asset.height);
+      this.add.image(iconX, numberY - 4 * UI_SCALE, asset.key).setDisplaySize(asset.width * iconScale, asset.height * iconScale);
       const countText = this.add
-        .text(iconX, numberY + 12, "0/0", { fontFamily: "sans-serif", fontSize: "9px", color: THEME.hud.text, fontStyle: "bold" })
+        .text(iconX, numberY + 12 * UI_SCALE, "0/0", { fontFamily: "sans-serif", fontSize: px(9), color: THEME.hud.text, fontStyle: "bold" })
         .setOrigin(0.5);
       return { type, countText };
     });
   }
 
   private createMuteButton(): void {
-    const x = this.scale.width - 30;
-    const y = 35;
-    drawGlossyButton(this, x, y, 38, 38, THEME.hud.chip, THEME.hud.chipStroke).setDepth(14);
+    const x = this.scale.width - 30 * UI_SCALE;
+    const y = 35 * UI_SCALE;
+    drawGlossyButton(this, x, y, 38 * UI_SCALE, 38 * UI_SCALE, THEME.hud.chip, THEME.hud.chipStroke).setDepth(14);
     this.muteButton = this.add
-      .text(x, y, "🔊", { fontSize: "16px" })
+      .text(x, y, "🔊", { fontSize: px(16) })
       .setOrigin(0.5)
       .setDepth(15)
       .setInteractive({ useHandCursor: true });
@@ -370,11 +380,11 @@ export class BoardScene extends Phaser.Scene {
   }
 
   private createMapButton(): void {
-    const x = 30;
-    const y = 35;
-    drawGlossyButton(this, x, y, 38, 38, THEME.hud.chip, THEME.hud.chipStroke).setDepth(14);
+    const x = 30 * UI_SCALE;
+    const y = 35 * UI_SCALE;
+    drawGlossyButton(this, x, y, 38 * UI_SCALE, 38 * UI_SCALE, THEME.hud.chip, THEME.hud.chipStroke).setDepth(14);
     this.mapButton = this.add
-      .text(x, y, "☰", { fontFamily: "sans-serif", fontSize: "16px", color: THEME.hud.text, fontStyle: "bold" })
+      .text(x, y, "☰", { fontFamily: "sans-serif", fontSize: px(16), color: THEME.hud.text, fontStyle: "bold" })
       .setOrigin(0.5)
       .setDepth(15)
       .setInteractive({ useHandCursor: true });
@@ -434,8 +444,8 @@ export class BoardScene extends Phaser.Scene {
         const { x, y } = this.cellCenter(col, row);
 
         if (cell === null) {
-          const socketRadius = (CELL_SIZE - CELL_PADDING * 2) / 2 - 4;
-          const socket = this.add.circle(x, y, socketRadius, THEME.socket.fill).setStrokeStyle(2, THEME.socket.stroke);
+          const socketRadius = (CELL_SIZE - CELL_PADDING * 2) / 2 - 4 * UI_SCALE;
+          const socket = this.add.circle(x, y, socketRadius, THEME.socket.fill).setStrokeStyle(2 * UI_SCALE, THEME.socket.stroke);
           this.boardLayer.add(socket);
           this.candyObjects[row][col] = null;
           continue;
@@ -499,20 +509,20 @@ export class BoardScene extends Phaser.Scene {
    * tracked in `decorTweens` so `destroyCandy` can stop it. */
   private addSpeedLines(visual: Phaser.GameObjects.Container, horizontal: boolean): void {
     const tweens: Phaser.Tweens.Tween[] = [];
-    const lengths = [22, 16, 10];
+    const lengths = [22 * UI_SCALE, 16 * UI_SCALE, 10 * UI_SCALE];
     lengths.forEach((len, i) => {
-      const offset = (i - 1) * 7;
+      const offset = (i - 1) * 7 * UI_SCALE;
       const bar = horizontal
-        ? this.add.rectangle(-18, offset, len, 2.6, THEME.speedLine)
-        : this.add.rectangle(offset, -18, 2.6, len, THEME.speedLine);
+        ? this.add.rectangle(-18 * UI_SCALE, offset, len, 2.6 * UI_SCALE, THEME.speedLine)
+        : this.add.rectangle(offset, -18 * UI_SCALE, 2.6 * UI_SCALE, len, THEME.speedLine);
       bar.setAlpha(0.75);
       visual.add(bar);
       tweens.push(
         this.tweens.add({
           targets: bar,
           alpha: 1,
-          x: horizontal ? bar.x - 4 : bar.x,
-          y: horizontal ? bar.y : bar.y - 4,
+          x: horizontal ? bar.x - 4 * UI_SCALE : bar.x,
+          y: horizontal ? bar.y : bar.y - 4 * UI_SCALE,
           duration: 260 + i * 40,
           delay: i * 80,
           yoyo: true,
@@ -531,8 +541,8 @@ export class BoardScene extends Phaser.Scene {
    * `decorTweens` for cleanup. */
   private addWrappedGlow(visual: Phaser.GameObjects.Container): void {
     const radius = PIECE_TARGET_SIZE * 0.44;
-    const edge = this.add.circle(0, 0, radius, 0x000000, 0).setStrokeStyle(5, THEME.wrappedGlowEdge, 0.4);
-    const ring = this.add.circle(0, 0, radius, 0x000000, 0).setStrokeStyle(4, THEME.wrappedGlow, 1);
+    const edge = this.add.circle(0, 0, radius, 0x000000, 0).setStrokeStyle(5 * UI_SCALE, THEME.wrappedGlowEdge, 0.4);
+    const ring = this.add.circle(0, 0, radius, 0x000000, 0).setStrokeStyle(4 * UI_SCALE, THEME.wrappedGlow, 1);
     visual.add(edge);
     visual.add(ring);
     const tween = this.tweens.add({
@@ -554,7 +564,7 @@ export class BoardScene extends Phaser.Scene {
     const seed = (col * 131 + row * 977) % 997;
     const tween = this.tweens.add({
       targets: visual,
-      y: -1.6,
+      y: -1.6 * UI_SCALE,
       duration: 1500 + (seed % 7) * 110,
       delay: seed % 500,
       yoyo: true,
@@ -862,10 +872,10 @@ export class BoardScene extends Phaser.Scene {
       this.soundEngine.wrapped();
       const puffs: [number, number][] = [
         [0, 0],
-        [10, -6],
-        [-10, -6],
-        [8, 8],
-        [-8, 8],
+        [10 * UI_SCALE, -6 * UI_SCALE],
+        [-10 * UI_SCALE, -6 * UI_SCALE],
+        [8 * UI_SCALE, 8 * UI_SCALE],
+        [-8 * UI_SCALE, 8 * UI_SCALE],
       ];
       const cloud = puffs.map(([dx, dy]) =>
         this.add.circle(x + dx, y + dy, CELL_SIZE * 0.22, 0xffffff, 0.9).setDepth(8),
@@ -893,8 +903,8 @@ export class BoardScene extends Phaser.Scene {
             this.time.delayedCall(i * perCellDelay, () => {
               const p = this.cellCenter(cell.col, cell.row);
               const zap = this.add.container(p.x, p.y).setDepth(8);
-              const barA = this.add.rectangle(0, 0, 12, 2.4, THEME.accent.primary);
-              const barB = this.add.rectangle(0, 0, 12, 2.4, THEME.accent.primary).setAngle(90);
+              const barA = this.add.rectangle(0, 0, 12 * UI_SCALE, 2.4 * UI_SCALE, THEME.accent.primary);
+              const barB = this.add.rectangle(0, 0, 12 * UI_SCALE, 2.4 * UI_SCALE, THEME.accent.primary).setAngle(90);
               zap.add([barA, barB]);
               zap.setAlpha(0.95);
               this.boardLayer.add(zap);
@@ -1028,12 +1038,12 @@ export class BoardScene extends Phaser.Scene {
       const { x, y } = this.cellCenter(cell.col, cell.row);
       const color = (obj.getData("color") as number | undefined) ?? 0xffffff;
       for (const { dx, dy } of directions) {
-        const particle = this.add.circle(x, y, 4, color).setDepth(9);
+        const particle = this.add.circle(x, y, 4 * UI_SCALE, color).setDepth(9);
         this.boardLayer.add(particle);
         this.tweens.add({
           targets: particle,
-          x: x + dx * 22,
-          y: y + dy * 22,
+          x: x + dx * 22 * UI_SCALE,
+          y: y + dy * 22 * UI_SCALE,
           alpha: 0,
           scale: 0,
           duration: 260,
@@ -1072,11 +1082,11 @@ export class BoardScene extends Phaser.Scene {
     const label = this.add
       .text(x, y, text, {
         fontFamily: "sans-serif",
-        fontSize: `${fontSize}px`,
+        fontSize: px(fontSize),
         color: "#ffffff",
         fontStyle: "bold",
         stroke: "#000000",
-        strokeThickness: 4,
+        strokeThickness: 4 * UI_SCALE,
       })
       .setOrigin(0.5)
       .setDepth(10)
@@ -1093,7 +1103,7 @@ export class BoardScene extends Phaser.Scene {
         this.tweens.add({
           targets: label,
           alpha: 0,
-          y: y - 20,
+          y: y - 20 * UI_SCALE,
           delay: 500,
           duration: 400,
           onComplete: () => label.destroy(),
@@ -1106,8 +1116,8 @@ export class BoardScene extends Phaser.Scene {
     this.clearSelection();
     this.selected = cell;
     const { x, y } = this.cellCenter(cell.col, cell.row);
-    const radius = (CELL_SIZE - CELL_PADDING * 2) / 2 + 4;
-    this.selectionRing = this.add.circle(x, y, radius).setStrokeStyle(3, THEME.selectionRing);
+    const radius = (CELL_SIZE - CELL_PADDING * 2) / 2 + 4 * UI_SCALE;
+    this.selectionRing = this.add.circle(x, y, radius).setStrokeStyle(3 * UI_SCALE, THEME.selectionRing);
     this.selectionTween = this.tweens.add({
       targets: this.selectionRing,
       scale: 1.15,
@@ -1268,57 +1278,60 @@ export class BoardScene extends Phaser.Scene {
     const level = this.gameState.level;
     const centerX = this.scale.width / 2;
     const centerY = this.scale.height / 2;
-    const panelHeight = 190;
+    const panelHeight = 190 * UI_SCALE;
     const panelTop = centerY - panelHeight / 2;
+    const panelHalfWidth = 135 * UI_SCALE;
 
     const backdrop = this.add.rectangle(centerX, centerY, this.scale.width, this.scale.height, 0x4a3f5c, 0.55);
     const panelGraphics = this.add.graphics();
     panelGraphics.fillStyle(THEME.overlayPanel.fill, 1);
-    panelGraphics.fillRoundedRect(centerX - 135, panelTop, 270, panelHeight, 20);
-    panelGraphics.lineStyle(3, THEME.overlayPanel.stroke, 1);
-    panelGraphics.strokeRoundedRect(centerX - 135, panelTop, 270, panelHeight, 20);
+    panelGraphics.fillRoundedRect(centerX - panelHalfWidth, panelTop, panelHalfWidth * 2, panelHeight, 20 * UI_SCALE);
+    panelGraphics.lineStyle(3 * UI_SCALE, THEME.overlayPanel.stroke, 1);
+    panelGraphics.strokeRoundedRect(centerX - panelHalfWidth, panelTop, panelHalfWidth * 2, panelHeight, 20 * UI_SCALE);
 
     const badge = THEME.goalBadge[level.goal.kind];
-    const badgeText = this.add.text(centerX, panelTop + 38, badge, { fontSize: "34px" }).setOrigin(0.5);
+    const badgeText = this.add.text(centerX, panelTop + 38 * UI_SCALE, badge, { fontSize: px(34) }).setOrigin(0.5);
 
     const titleText = this.add
-      .text(centerX, panelTop + 84, `Level ${level.id}`, {
+      .text(centerX, panelTop + 84 * UI_SCALE, `Level ${level.id}`, {
         fontFamily: "sans-serif",
-        fontSize: "15px",
+        fontSize: px(15),
         color: THEME.overlayPanel.subtext,
         fontStyle: "bold",
       })
       .setOrigin(0.5);
 
     const goalText = this.add
-      .text(centerX, panelTop + 110, this.goalStatement(), {
+      .text(centerX, panelTop + 110 * UI_SCALE, this.goalStatement(), {
         fontFamily: "sans-serif",
-        fontSize: "17px",
+        fontSize: px(17),
         color: THEME.overlayPanel.text,
         fontStyle: "bold",
         align: "center",
-        wordWrap: { width: 236 },
+        wordWrap: { width: 236 * UI_SCALE },
       })
       .setOrigin(0.5);
 
     const pieceIcons: Phaser.GameObjects.GameObject[] = [];
     if (level.goal.kind === "collect") {
       const types = Object.keys(level.goal.pieces).map(Number) as CandyType[];
-      const spacing = 40;
+      const spacing = 40 * UI_SCALE;
       const startX = centerX - ((types.length - 1) * spacing) / 2;
       types.forEach((type, i) => {
         const asset = VEHICLE_ASSETS[type];
-        const scale = 28 / Math.max(asset.width, asset.height);
+        const scale = (28 * UI_SCALE) / Math.max(asset.width, asset.height);
         pieceIcons.push(
-          this.add.image(startX + i * spacing, panelTop + 148, asset.key).setDisplaySize(asset.width * scale, asset.height * scale),
+          this.add
+            .image(startX + i * spacing, panelTop + 148 * UI_SCALE, asset.key)
+            .setDisplaySize(asset.width * scale, asset.height * scale),
         );
       });
     }
 
     const prompt = this.add
-      .text(centerX, panelTop + panelHeight - 18, "Tap to begin", {
+      .text(centerX, panelTop + panelHeight - 18 * UI_SCALE, "Tap to begin", {
         fontFamily: "sans-serif",
-        fontSize: "12px",
+        fontSize: px(12),
         color: THEME.overlayPanel.subtext,
       })
       .setOrigin(0.5);
@@ -1367,45 +1380,46 @@ export class BoardScene extends Phaser.Scene {
       this.spawnConfetti();
     }
 
-    const panelHeight = won ? 300 : 210;
+    const panelHeight = (won ? 300 : 210) * UI_SCALE;
+    const panelHalfWidth = 135 * UI_SCALE;
     const panelTop = centerY - panelHeight / 2;
     const panelGraphics = this.add.graphics().setDepth(20);
     panelGraphics.fillStyle(THEME.overlayPanel.fill, 1);
-    panelGraphics.fillRoundedRect(centerX - 135, centerY - panelHeight / 2, 270, panelHeight, 20);
-    panelGraphics.lineStyle(3, THEME.overlayPanel.stroke, 1);
-    panelGraphics.strokeRoundedRect(centerX - 135, centerY - panelHeight / 2, 270, panelHeight, 20);
+    panelGraphics.fillRoundedRect(centerX - panelHalfWidth, panelTop, panelHalfWidth * 2, panelHeight, 20 * UI_SCALE);
+    panelGraphics.lineStyle(3 * UI_SCALE, THEME.overlayPanel.stroke, 1);
+    panelGraphics.strokeRoundedRect(centerX - panelHalfWidth, panelTop, panelHalfWidth * 2, panelHeight, 20 * UI_SCALE);
     elements.push(panelGraphics);
 
     const title = won ? (isFinalLevel ? "All Levels Complete!" : `Level ${level.id} Complete!`) : "Out of Moves";
     const titleText = this.add
-      .text(centerX, panelTop + 36, title, {
+      .text(centerX, panelTop + 36 * UI_SCALE, title, {
         fontFamily: "sans-serif",
-        fontSize: isFinalLevel ? "20px" : "23px",
+        fontSize: isFinalLevel ? px(20) : px(23),
         color: THEME.overlayPanel.text,
         fontStyle: "bold",
         align: "center",
-        wordWrap: { width: 236 },
+        wordWrap: { width: 236 * UI_SCALE },
       })
       .setOrigin(0.5);
     elements.push(titleText);
 
     const subtitle = this.goalSubtitle(won);
     const subtitleText = this.add
-      .text(centerX, panelTop + (isFinalLevel ? 68 : 72), subtitle, {
+      .text(centerX, panelTop + (isFinalLevel ? 68 : 72) * UI_SCALE, subtitle, {
         fontFamily: "sans-serif",
-        fontSize: "16px",
+        fontSize: px(16),
         color: THEME.overlayPanel.subtext,
       })
       .setOrigin(0.5);
     elements.push(subtitleText);
 
     if (won) {
-      const starY = panelTop + 110;
+      const starY = panelTop + 110 * UI_SCALE;
       for (let i = 0; i < 3; i++) {
         const star = this.add
-          .text(centerX + (i - 1) * 34, starY, "★", {
+          .text(centerX + (i - 1) * 34 * UI_SCALE, starY, "★", {
             fontFamily: "sans-serif",
-            fontSize: "30px",
+            fontSize: px(30),
             color: "#e4d7ba",
           })
           .setOrigin(0.5);
@@ -1421,15 +1435,15 @@ export class BoardScene extends Phaser.Scene {
     }
 
     const primaryLabel = won ? (isFinalLevel ? "Level Map" : "Next Level") : "Try Again";
-    const primaryY = panelTop + (won ? 160 : 110);
-    const primaryButton = drawGlossyButton(this, centerX, primaryY, 180, 42, THEME.accent.primary, 0xffffff);
+    const primaryY = panelTop + (won ? 160 : 110) * UI_SCALE;
+    const primaryButton = drawGlossyButton(this, centerX, primaryY, 180 * UI_SCALE, 42 * UI_SCALE, THEME.accent.primary, 0xffffff);
     const primaryHit = this.add
-      .rectangle(centerX, primaryY, 180, 42, 0x000000, 0)
+      .rectangle(centerX, primaryY, 180 * UI_SCALE, 42 * UI_SCALE, 0x000000, 0)
       .setInteractive({ useHandCursor: true });
     const primaryText = this.add
       .text(centerX, primaryY, primaryLabel, {
         fontFamily: "sans-serif",
-        fontSize: "16px",
+        fontSize: px(16),
         color: "#ffffff",
         fontStyle: "bold",
       })
@@ -1447,15 +1461,15 @@ export class BoardScene extends Phaser.Scene {
     });
 
     if (!(won && isFinalLevel)) {
-      const secondaryY = primaryY + 54;
-      const secondaryButton = drawGlossyButton(this, centerX, secondaryY, 180, 38, 0xffffff, THEME.accent.primary);
+      const secondaryY = primaryY + 54 * UI_SCALE;
+      const secondaryButton = drawGlossyButton(this, centerX, secondaryY, 180 * UI_SCALE, 38 * UI_SCALE, 0xffffff, THEME.accent.primary);
       const secondaryHit = this.add
-        .rectangle(centerX, secondaryY, 180, 38, 0x000000, 0)
+        .rectangle(centerX, secondaryY, 180 * UI_SCALE, 38 * UI_SCALE, 0x000000, 0)
         .setInteractive({ useHandCursor: true });
       const secondaryText = this.add
         .text(centerX, secondaryY, "Level Map", {
           fontFamily: "sans-serif",
-          fontSize: "15px",
+          fontSize: px(15),
           color: THEME.overlayPanel.text,
         })
         .setOrigin(0.5);
@@ -1470,15 +1484,15 @@ export class BoardScene extends Phaser.Scene {
    * panel (depth 19, just under the panel's depth 20). Fire-and-forget. */
   private spawnConfetti(): void {
     for (let i = 0; i < 26; i++) {
-      const x = Phaser.Math.Between(16, this.scale.width - 16);
+      const x = Phaser.Math.Between(16 * UI_SCALE, this.scale.width - 16 * UI_SCALE);
       const color = THEME.confetti[i % THEME.confetti.length];
       const piece = this.add
-        .rectangle(x, -16, 6, 10, color)
+        .rectangle(x, -16 * UI_SCALE, 6 * UI_SCALE, 10 * UI_SCALE, color)
         .setDepth(19)
         .setAngle(Phaser.Math.Between(0, 360));
       this.tweens.add({
         targets: piece,
-        y: this.scale.height + 20,
+        y: this.scale.height + 20 * UI_SCALE,
         angle: piece.angle + Phaser.Math.Between(180, 540) * (i % 2 === 0 ? 1 : -1),
         duration: Phaser.Math.Between(900, 1600),
         delay: Phaser.Math.Between(0, 400),
