@@ -63,6 +63,26 @@ interface DragStart extends Cell {
   y: number;
 }
 
+/** Perimeter points for a jelly tile's shape: a rounded-square ("squircle")
+ * whose radius is sine-modulated `bumps` times around the circle, giving a
+ * soft scalloped/bulging edge instead of a plain rounded rect. `amplitude`
+ * is a fraction of `halfSize` (keep small — this is meant to read as a
+ * subtle bulge, not a flower). */
+function scallopedSquirclePoints(halfSize: number, bumps: number, amplitude: number, phase: number, samples = 48): { x: number; y: number }[] {
+  const squareness = 4;
+  const points: { x: number; y: number }[] = [];
+  for (let i = 0; i < samples; i++) {
+    const t = (i / samples) * Math.PI * 2;
+    const c = Math.cos(t);
+    const s = Math.sin(t);
+    const ex = Math.sign(c) * Math.abs(c) ** (2 / squareness);
+    const ey = Math.sign(s) * Math.abs(s) ** (2 / squareness);
+    const wobble = 1 + amplitude * Math.sin(t * bumps + phase);
+    points.push({ x: ex * halfSize * wobble, y: ey * halfSize * wobble });
+  }
+  return points;
+}
+
 export class BoardScene extends Phaser.Scene {
   private levelId!: number;
   private gameState!: GameState;
@@ -84,10 +104,12 @@ export class BoardScene extends Phaser.Scene {
   private introActive = false;
   private hintTimer: Phaser.Time.TimerEvent | null = null;
   private hintTweens: Phaser.Tweens.Tween[] = [];
-  /** Jelly wobble overlays, keyed like `candyObjects` — null where a cell
-   * never had jelly or has already had it cleared. Only populated for
-   * jelly-goal levels. */
-  private jellyOverlays: (Phaser.GameObjects.Container | null)[][] = [];
+  /** Jelly-styled tiles, keyed like `candyObjects` — null where a cell never
+   * had jelly or has already had it cleared. Drawn in place of (directly
+   * above) that cell's plain white tile from `drawTiles()`, not above the
+   * piece; popping one away reveals the plain white tile already sitting
+   * underneath. Only populated for jelly-goal levels. */
+  private jellyTiles: (Phaser.GameObjects.Container | null)[][] = [];
   /** Goal-segment display objects for a "collect" level, one per tracked
    * CandyType, so updateHud() can update/pop each independently. */
   private collectIcons: { type: CandyType; countText: Phaser.GameObjects.Text }[] = [];
@@ -112,7 +134,7 @@ export class BoardScene extends Phaser.Scene {
     this.introActive = false;
     this.hintTimer = null;
     this.hintTweens = [];
-    this.jellyOverlays = [];
+    this.jellyTiles = [];
     this.collectIcons = [];
     this.lastJellyRemaining = 0;
     this.lastCollectCollected = {};
@@ -128,14 +150,14 @@ export class BoardScene extends Phaser.Scene {
     this.offsetX = (this.scale.width - boardPixelSize) / 2;
     this.offsetY = HUD_HEIGHT + BOARD_MARGIN / 2;
 
-    // Constructed before any rendering below so drawJellyOverlay() can query
+    // Constructed before any rendering below so drawJellyTiles() can query
     // board.hasJelly() and createHud() can read the level's goal shape.
     this.gameState = new GameState({ level, seed: Date.now() });
 
     drawSkyBackground(this, this.scale.width, this.scale.height);
     this.drawBoardPanel(boardPixelSize);
     this.drawTiles();
-    this.drawJellyOverlay();
+    this.drawJellyTiles();
 
     this.createHud();
     this.createMuteButton();
@@ -193,13 +215,17 @@ export class BoardScene extends Phaser.Scene {
     }
   }
 
-  /** Only for jelly-goal levels: a wobbly translucent blob sitting on top of
-   * every jelly-covered tile, tracked in `jellyOverlays` (indexed like
-   * `candyObjects`) so `playJellyClears` can pop and remove individual
-   * cells as they clear mid-cascade. Drawn once, outside `boardLayer`, same
-   * reasoning as `drawTiles()` — jelly position never moves with gravity. */
-  private drawJellyOverlay(): void {
-    this.jellyOverlays = Array.from({ length: BOARD_ROWS }, () => Array<Phaser.GameObjects.Container | null>(BOARD_COLS).fill(null));
+  /** Only for jelly-goal levels: replaces a jellied cell's plain white tile
+   * (from `drawTiles()`) with a pale-blue glossy one, tracked in
+   * `jellyTiles` (indexed like `candyObjects`) so `playJellyClears` can pop
+   * and remove individual cells as they clear mid-cascade. Drawn directly
+   * above that cell's white tile — *not* above the piece, which is added to
+   * `boardLayer` afterward and so always renders on top — and once, outside
+   * `boardLayer`, same reasoning as `drawTiles()`: jelly position never
+   * moves with gravity. Popping a jelly tile away reveals the plain white
+   * tile already sitting underneath, which is the "removal" animation. */
+  private drawJellyTiles(): void {
+    this.jellyTiles = Array.from({ length: BOARD_ROWS }, () => Array<Phaser.GameObjects.Container | null>(BOARD_COLS).fill(null));
 
     if (this.gameState.level.goal.kind !== "jelly") {
       return;
@@ -207,26 +233,45 @@ export class BoardScene extends Phaser.Scene {
     for (let row = 0; row < BOARD_ROWS; row++) {
       for (let col = 0; col < BOARD_COLS; col++) {
         if (this.gameState.board.hasJelly(col, row)) {
-          this.jellyOverlays[row][col] = this.makeJellyBlob(col, row);
+          this.jellyTiles[row][col] = this.makeJellyTile(col, row);
         }
       }
     }
   }
 
-  private makeJellyBlob(col: number, row: number): Phaser.GameObjects.Container {
+  /** A glossy pale-blue tile with a subtly scalloped edge (a squircle
+   * outline whose radius is sine-modulated a few times around the
+   * perimeter, per-cell phase-shifted so neighboring tiles don't wobble in
+   * lockstep) plus a small glass-shine highlight. Deliberately no separate
+   * drop shadow — the plain white tile underneath (`drawTiles()`) already
+   * paints one, and the scallop bumps are subtle enough that reusing it
+   * reads fine. `THEME.jellyTile.fill` was picked close in lightness to
+   * `THEME.tile.fill` specifically so a piece on jelly reads exactly as
+   * clearly as one on a normal white tile. */
+  private makeJellyTile(col: number, row: number): Phaser.GameObjects.Container {
     const { x, y } = this.cellCenter(col, row);
-    const container = this.add.container(x, y).setDepth(2);
-    const radius = TILE_SIZE * 0.4;
-    const blob = this.add
-      .circle(0, 0, radius, THEME.jelly.fill, 0.55)
-      .setStrokeStyle(2 * UI_SCALE, THEME.jelly.stroke, 0.8);
-    container.add(blob);
+    const container = this.add.container(x, y);
 
     const seed = (col * 131 + row * 977) % 997;
+    const halfSize = TILE_SIZE / 2;
+    const points = scallopedSquirclePoints(halfSize, 8, 0.035, (seed / 997) * Math.PI * 2);
+
+    const shape = this.add.graphics();
+    shape.fillStyle(THEME.jellyTile.fill, 1);
+    shape.fillPoints(points, true);
+    shape.lineStyle(1.5 * UI_SCALE, THEME.jellyTile.stroke, 1);
+    shape.strokePoints(points, true, true);
+    container.add(shape);
+
+    const shine = this.add
+      .ellipse(-halfSize * 0.32, -halfSize * 0.4, halfSize * 0.85, halfSize * 0.4, THEME.jellyTile.shine, 0.35)
+      .setRotation(-0.4);
+    container.add(shine);
+
     this.tweens.add({
-      targets: blob,
-      scaleX: 1.08,
-      scaleY: 0.92,
+      targets: container,
+      scaleX: 1.035,
+      scaleY: 0.965,
       duration: 900 + (seed % 400),
       delay: seed % 300,
       yoyo: true,
@@ -237,26 +282,27 @@ export class BoardScene extends Phaser.Scene {
     return container;
   }
 
-  /** Pops and removes the jelly overlay under each newly-cleared cell (fire
-   * and forget, concurrent with the candy clear-pop). */
+  /** Pops and removes the jelly tile under each newly-cleared cell (fire
+   * and forget, concurrent with the candy clear-pop), transitioning it back
+   * to the plain white tile already sitting underneath. */
   private playJellyClears(cells: Cell[]): void {
     if (cells.length === 0) {
       return;
     }
     this.soundEngine.jellySplat();
     for (const cell of cells) {
-      const overlay = this.jellyOverlays[cell.row]?.[cell.col];
-      if (!overlay) {
+      const tile = this.jellyTiles[cell.row]?.[cell.col];
+      if (!tile) {
         continue;
       }
-      this.jellyOverlays[cell.row][cell.col] = null;
+      this.jellyTiles[cell.row][cell.col] = null;
       this.tweens.add({
-        targets: overlay,
+        targets: tile,
         scale: 1.5,
         alpha: 0,
         duration: 260,
         ease: "Back.In",
-        onComplete: () => overlay.destroy(),
+        onComplete: () => tile.destroy(),
       });
     }
   }

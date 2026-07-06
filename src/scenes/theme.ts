@@ -105,10 +105,12 @@ export const THEME = {
   wrappedGlow: 0xffb300,
   wrappedGlowEdge: 0x6b4a1f,
   confetti: [0xff6b4a, 0xf4c430, 0x3fae5a, 0x4a90d9, 0x9b59b6, 0xffffff],
-  /** Jelly overlay (SLICE 8): a translucent wobbly blue-ish blob sitting on
-   * top of a tile, "cute not gross" per spec — a soft fill with a slightly
-   * darker stroke, popped in `splat` when cleared. */
-  jelly: { fill: 0x4aa8e0, stroke: 0x2c7fb0, splat: 0x1f5f85 },
+  /** Jelly tile (SLICE 8, redesigned): jellied cells swap the plain white
+   * `tile` fill/stroke above for this pale-blue glossy pair instead of
+   * layering anything on top of the piece — chosen close in lightness to
+   * `tile.fill` so a piece reads exactly as clearly on jelly as on white.
+   * `shine` is the small glass-highlight ellipse drawn on the tile. */
+  jellyTile: { fill: 0xcdeefb, stroke: 0x7ec8ea, shine: 0xffffff },
   /** Small per-node goal-kind badge on the level map. */
   goalBadge: { score: "⭐", collect: "🚗", jelly: "🟦" },
 } as const;

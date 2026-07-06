@@ -47,6 +47,9 @@ Built by Caroline (product owner / QA) with Claude Code as builder.
 ## STATUS
 - Current slice: SLICE 8 (level goals & expanded levels) — all 4 checkpoints implemented and
   verified, tests green throughout, build clean. See DECISIONS LOG below for the full breakdown.
+- Two same-day follow-ups on top of SLICE 8, both pushed to `main` (auto-deploy, not separately
+  re-verified against the live URL): a Retina/high-DPI blur fix, and a jelly-rendering redesign
+  (tile swap instead of a piece-obscuring overlay) — see the latest decisions-log entries.
 - Deployed URL: https://candygame-six.vercel.app — see the SLICE 8 decisions-log entry for the
   post-commit deploy confirmation.
 
@@ -891,6 +894,40 @@ Built by Caroline (product owner / QA) with Claude Code as builder.
   Zero console errors across every pass.
   **Not committed as part of SLICE 8's original commit** — this is a same-day follow-up fix layered
   on top; see the next entry for the commit/deploy confirmation.
+- 2026-07-06: **Jelly rendering redesign — tile swap instead of a piece-obscuring overlay.** Caroline
+  asked for the SLICE 8 jelly visual (a translucent blue blob layered on top of the piece) to be
+  removed entirely and replaced with a jelly-styled *tile* underneath a fully opaque piece. Root
+  cause of the old look, found while reading the code rather than guessed: `makeJellyBlob`'s
+  container had `setDepth(2)` while `boardLayer` (holding every piece) sits at the scene's default
+  depth 0 — Phaser's depth sort rendered the blob *above* the piece regardless of add-order, which is
+  exactly the "on top of the piece" complaint.
+  `theme.ts`'s `jelly` constant was replaced with `jellyTile: { fill, stroke, shine }` — `fill`
+  (`0xcdeefb`, pale glossy blue) was deliberately picked close in *lightness* to `THEME.tile.fill`
+  (near-white) specifically so a piece reads exactly as clearly on a jelly tile as on a plain one.
+  `BoardScene.ts`: `drawJellyOverlay`/`makeJellyBlob`/the `jellyOverlays` field were renamed to
+  `drawJellyTiles`/`makeJellyTile`/`jellyTiles` and rebuilt — each jellied cell now gets its own
+  small Container (fill + stroke shape, plus a small white glass-shine ellipse) drawn *in place of*
+  its plain white tile, added before `boardLayer` exists (so pieces always render on top by
+  insertion order, with no explicit depth needed — same pattern `drawTiles()` already used). The
+  shape itself is a new standalone `scallopedSquirclePoints()` helper: a rounded-square ("squircle")
+  outline whose radius is sine-modulated a few times around the perimeter, giving the "subtle
+  bulge/scalloped wobbly edge" Caroline asked for; the existing per-cell seeded scale-yoyo tween
+  (same desync trick as the old blob) supplies the "wobbly" half of that. `playJellyClears` needed no
+  logic changes — it already just pops/fades/destroys whatever's in the tracked grid; since that grid
+  now holds the tile itself instead of an overlay, the pop reveals the plain white tile already
+  painted underneath, which *is* the "transition back to white" Caroline asked for, with no new code
+  path required.
+  **Verification**: 114/114 tests pass unchanged, build clean (render-layer-only change, confirmed no
+  `src/logic/` edits). Ran the actual dev server (not just a static screenshot): Playwright, seeded
+  `localStorage` to unlock Level 7 (the first jelly-goal level), tapped through the level map and
+  intro popup with real pointer clicks, and screenshotted a live board showing a mix of jellied and
+  plain cells — confirmed pieces are fully opaque with zero overlay film on jelly tiles, and a
+  zoomed-in crop confirmed the pale-blue fill/scalloped edge/shine render as intended. Then drove real
+  tap-tap swaps that triggered actual matches/cascades near the jelly block: the HUD's jelly counter
+  ticked down live (8 → 1), and every newly-cleared jelly cell visibly popped back to a plain white
+  tile — a final zoomed crop of the one remaining jelly tile (a piece sitting on it) confirmed the
+  contrast/readability goal directly. Zero console errors across every pass. No debug scaffolding or
+  extra dependencies left behind (`git status` clean of stray files).
 
 ## OPEN QUESTIONS
 - **SLICE 8's own "After Completion" ask, not yet done**: Caroline + son should playtest L1-L20 —
