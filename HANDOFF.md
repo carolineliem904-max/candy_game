@@ -43,14 +43,13 @@ Built by Caroline (product owner / QA) with Claude Code as builder.
 - [x] SLICE 6B: Special candies
 - [x] SLICE 7: Theme & art pass — "Beep Beep!" (vehicles)
 - [x] SLICE 8: Level goals & expanded levels (collect/jelly goals, 20-level set)
+- [x] SLICE 9: Mobile & tablet pass (responsive scale-up, touch comfort, PWA install)
 
 ## STATUS
-- Current slice: SLICE 8 (level goals & expanded levels) — all 4 checkpoints implemented and
-  verified, tests green throughout, build clean. See DECISIONS LOG below for the full breakdown.
-- Two same-day follow-ups on top of SLICE 8, both pushed to `main` (auto-deploy, not separately
-  re-verified against the live URL): a Retina/high-DPI blur fix, and a jelly-rendering redesign
-  (tile swap instead of a piece-obscuring overlay) — see the latest decisions-log entries.
-- Deployed URL: https://candygame-six.vercel.app — see the SLICE 8 decisions-log entry for the
+- Current slice: SLICE 9 (mobile & tablet pass) — all 4 checkpoints implemented and verified,
+  114/114 tests unchanged (render/platform-only slice, per spec), build clean. See DECISIONS LOG
+  below for the full breakdown.
+- Deployed URL: https://candygame-six.vercel.app — see the SLICE 9 decisions-log entry for the
   post-commit deploy confirmation.
 
 ## DECISIONS LOG
@@ -929,7 +928,139 @@ Built by Caroline (product owner / QA) with Claude Code as builder.
   contrast/readability goal directly. Zero console errors across every pass. No debug scaffolding or
   extra dependencies left behind (`git status` clean of stray files).
 
+- 2026-07-07: **SLICE 9 implemented — all 4 checkpoints (responsive scale-up, touch comfort, PWA
+  install, verify/ship), 114/114 tests unchanged throughout (render/platform-only slice, per spec).**
+  **Checkpoint 1 (responsive scale-up)**: `main.ts`'s old `applyResponsiveZoom` only ever shrunk
+  to fit `MAX_CSS_WIDTH` (480) — exactly why an iPad rendered the design-size board with huge
+  margins, per the spec's "iPad fix" framing. Replaced with `getAvailableSize()` (prefers
+  `window.visualViewport`, which stays accurate through iOS Safari's address-bar/keyboard chrome
+  changes, over `window.innerWidth/Height`) minus room for the on-page `<h1>` and the body's flex
+  `gap`, then `applyResponsiveZoom` scales to fill that space in **both** directions — up on a big
+  screen, down on a narrow phone — maintaining aspect ratio, capped at `MAX_SCALE = 2.2` (tuned by
+  eye against an iPad Pro 11 emulation, per spec's "tune by eye" instruction). `index.html`'s
+  `#app { max-width: 480px }` (a second, redundant width cap) was widened to `100vw` since it would
+  otherwise clip a scaled-up canvas regardless of the JS math. Listens on `resize`,
+  `orientationchange` (with a 50ms settle delay — iOS Safari briefly reports stale dimensions right
+  after rotation), and `visualViewport`'s own `resize` event. The Retina fix's `UI_SCALE`/`zoom`
+  decoupling (`Phaser.Scale.NONE` + `zoom`, from the prior follow-up) composes with this cleanly by
+  construction — `zoom` was already `responsiveScale / UI_SCALE`, so widening what "responsiveScale"
+  means didn't require touching the DPI half of that equation at all. Verified empirically, not
+  assumed: measured canvas CSS size vs. backing-store size vs. `devicePixelRatio` across desktop
+  Chrome (Retina + non-Retina), iPhone 14 (portrait + landscape), iPad Pro 11 (portrait + landscape),
+  and iPad Mini via Playwright device emulation — iPad Pro hit exactly the 2.2x cap (809.6 CSS px
+  from a 368px design width), desktop scaled to ~1.66x (pleasantly larger, not comical), phone
+  stayed ~1x, and Retina/non-Retina pairs produced byte-identical CSS sizes with correctly doubled
+  backing stores in every case, with zero horizontal overflow anywhere. Also drove a **real**
+  simulated tap through a level-map node at the iPad's 2.2x scale and confirmed it navigated
+  correctly (coordinate math holds at scale >1, not just <=1 like every prior slice's testing).
+  **Checkpoint 2 (touch comfort)**: audited every tap target against the ~44px comfortable-touch-
+  target floor. Level-map wheel nodes (32px visual diameter, a deliberate art choice) and the
+  mute/map corner chips (38px) were both under that floor — rather than resize the art, both now
+  get a separate invisible hit shape sized to a new `MIN_TOUCH_TARGET` (44 \* UI_SCALE) constant
+  layered on top/replacing the object that used to carry the interactive flag directly (`LevelMapScene`'s
+  node tap/tire circles, `BoardScene`'s mute/map buttons — the latter's `Text` objects turned out to
+  have an even smaller effective hit area than the 38px chip they sit in, since a `Text`'s default
+  hit area is just its own glyph bounds). The win/lose overlay's Next-Level/Try-Again/Level-Map
+  buttons' hit rectangles were bumped from their visual 38-42px height to `MIN_TOUCH_TARGET`,
+  leaving the visible glossy-button graphic untouched. New `IS_TOUCH_DEVICE` (`layout.ts`, detected
+  once via `"ontouchstart" in window || navigator.maxTouchPoints > 0`) drops `DRAG_THRESHOLD` from
+  `CELL_SIZE*0.3` to `CELL_SIZE*0.22` on touch devices only, per the spec's "consider slightly
+  lower on touch devices" note. `index.html`: viewport meta gained `maximum-scale=1.0,
+  user-scalable=no` (stops double-tap/pinch-zoom from fighting the game's own touch input) and
+  `viewport-fit=cover` (lets the page reach behind an iPhone notch); `html body` gained
+  `overscroll-behavior: none` + `touch-action: none` (there's no scrollable content on this page by
+  design, so these just stop iOS/Android from *attempting* rubber-band/pull-to-refresh at all,
+  rather than fighting a real scroll), and `#app`/`canvas` got their own explicit `touch-action:
+  none` too. **iOS audio unlock**: `SoundEngine.unlock()` (new) creates/resumes the `AudioContext`
+  and starts a near-silent 1-sample buffer — the buffer-start is the one extra step beyond a bare
+  `resume()`, since some iOS versions need an actual sound triggered (not just a resume call) to
+  fully unlock output. Called as the literal first line of `BoardScene.onPointerDown` — synchronously,
+  before the existing `introActive` early-return — because the game's real sound calls (e.g. `swap()`)
+  happen a few `await`s into an async cascade-animation sequence, which is too late for iOS Safari's
+  user-gesture window even though `getContext()` already calls `resume()` on every use. Verified
+  empirically via WebKit + real touch events (Playwright's closest available proxy to physical iOS
+  Safari): wrapped `window.AudioContext` in a page-level init script to capture every instance
+  created, confirmed our `SoundEngine`'s context (distinct from Phaser's own internal one, which
+  Phaser creates unconditionally for its unused built-in sound manager) enters `state: "running"`
+  immediately upon the first real touch tap, across iPhone and iPad WebKit contexts — not just "no
+  errors were thrown," which wouldn't have proven the context actually unlocked.
+  **Checkpoint 3 (PWA install)**: added `vite-plugin-pwa` as a devDependency (per spec's explicit
+  allowance), configured with its default `generateSW` strategy so the service worker is
+  auto-derived from the real build output (`workbox.globPatterns` precaches every hashed JS/CSS/
+  HTML/image/manifest asset) rather than hand-written and risking drifting out of sync with the
+  build. `registerType: "autoUpdate"` auto-injects a small `registerSW.js` — no manual SW
+  registration code needed in `main.ts`. Icons: a one-off Python/Pillow script (not part of the
+  build, not committed) derived every install icon from the red-car sprite already in
+  `public/vehicles/car-red.png` (per the spec's explicit instruction), writing to new
+  `public/icons/`: `icon-192.png`/`icon-512.png` (transparent background, car at 82% of canvas —
+  standard "any"-purpose icons, shown as-is with no OS cropping), `icon-maskable-512.png` (opaque
+  sky-blue `#8ecbe8` background — a transparent maskable icon shows through to the OS's own fill,
+  which looks broken — car scaled down to 62% so it clears the ~80%-diameter "safe zone" OSes crop
+  maskable icons to, even under an aggressive circular mask), and `apple-touch-icon.png` (180px,
+  same opaque sky-blue background since iOS fills transparent apple-touch-icon pixels with black).
+  Manifest: name/short_name "Beep Beep!", `theme_color`/`background_color` both `#8ecbe8` (matches
+  `THEME.sky.top` and the page's own gradient top), `display: "standalone"`,
+  `orientation: "portrait"`. `index.html` also got the iOS-specific tags the manifest alone can't
+  cover (Safari ignores the manifest's `display`/icons for "Add to Home Screen"):
+  `apple-touch-icon` link, `apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`
+  (`"default"` — chosen over `"black-translucent"` specifically to avoid needing safe-area-inset
+  padding, which this pass didn't add; `black-translucent` without that padding risks the `<h1>`
+  rendering partially under a notch/status-bar in standalone mode), `apple-mobile-web-app-title`,
+  plus a plain `theme-color` meta for Android Chrome's address-bar tinting even pre-install. One
+  build-time type-only wrinkle, not a real bug: `vite.config.ts`'s `defineConfig` comes from
+  `vitest/config`, which type-checks against vitest's own *nested* `vite@5` dependency
+  (`node_modules/vitest/node_modules/vite`), while `vite-plugin-pwa`'s `Plugin` type comes from this
+  project's top-level `vite@6` — two structurally-similar-but-distinct `Plugin` types TS won't
+  unify despite there being exactly one real Vite at runtime; the `VitePWA(...)` call is cast `as
+  any` at that one call site, documented inline, rather than downgrading the project's real Vite
+  version to chase type unification. Verified via a real Chromium session against the production
+  build (not dev server, so the SW/manifest actually reflect what ships): confirmed
+  `<link rel="manifest">` was auto-injected and resolves to valid JSON with all 3 icons fetchable
+  (200, non-zero bytes); confirmed the service worker registers and reaches `active`; confirmed the
+  single strongest offline claim directly — set the browser context fully offline, hard-reloaded,
+  and the app shell (title, canvas, board) loaded correctly from cache with zero network and zero
+  console errors.
+  **Checkpoint 4 (verify & ship)**: re-ran the exact device matrix from Checkpoint 1 as a combined
+  pass — iPhone Safari, iPad Safari (both via WebKit), desktop Chrome Retina + non-Retina (via
+  Chromium) — each one driving a **real** interaction sequence (level-map node tap → dismiss level
+  intro → tap-tap swap) rather than just loading and screenshotting: confirmed correct canvas
+  CSS/backing-store sizing and zero horizontal overflow on all four, confirmed the `SoundEngine`
+  AudioContext reaches `"running"` on all four (including the two Chromium desktop profiles, where
+  autoplay policy is more lenient but still worth checking), and confirmed zero console/page errors
+  throughout. The iPad Safari run's screenshot happened to land on a real match (visible "+180"
+  score popup, moves 15→14) — incidental confirmation that full gameplay, not just static layout,
+  works correctly at the 2.2x scale-up. 114/114 tests pass unchanged (confirmed at the start and
+  end of the slice — this was a render/platform-only pass, no `src/logic/` edits), `npm run build`
+  clean with the PWA plugin producing `dist/manifest.webmanifest`, `dist/sw.js`,
+  `dist/workbox-*.js`, and `dist/icons/*` alongside the existing bundle. All temporary debug
+  scaffolding (page-level `AudioContext`-wrapping init scripts, verification `.mjs` scripts,
+  temporarily-installed `playwright`) was written to the scratch dir or removed before finishing —
+  `git status` shows only real source/asset changes plus the new `public/icons/` and the
+  `vite-plugin-pwa` devDependency.
+  **Not done this slice, by design**: no Android device testing (Caroline doesn't have one
+  available — noted as untested per the spec's own "Out of Scope" list); no safe-area-inset padding
+  for the iPhone notch (kept `apple-mobile-web-app-status-bar-style: "default"` specifically to
+  sidestep needing it — worth revisiting if a future pass wants the fuller-immersion
+  `black-translucent` look); no boosters/blockers/combos/juice pass (explicitly out of scope, next
+  in backlog).
+  **Committed and deployed**: staged explicitly by filename (excludes the untracked `.claude/`
+  local-tooling directory and `SLICE_9_SPEC.md`, same "leave the spec file for Caroline/Architect"
+  precedent as SLICE 6B/8), committed and pushed to `main`, triggering the existing Vercel
+  auto-deploy. Confirmed via `npx vercel ls` that the resulting production deployment reached
+  `Ready`, then confirmed the production alias (candygame-six.vercel.app) serves the newly-built
+  bundle with a final pass against the *live* URL (not just local) confirming the manifest/icons/
+  service-worker are all reachable there too, with zero console errors.
+
 ## OPEN QUESTIONS
+- **SLICE 9's own "After Completion" ask, not yet done**: re-playtest with the boss on iPad, per
+  the spec — his session length is the metric. Everything in SLICE 9 was verified via device
+  emulation (Playwright/WebKit + Chromium), not a physical device, so this is the first real-hardware
+  check of the scale-up, touch comfort, and "Add to Home Screen" install flow. Also worth having him
+  try installing to the home screen and playing a level fully offline, since that's the one claim
+  this slice couldn't verify on real hardware.
+- **Android untested**: no Android device was available this slice (out of scope per SLICE 9's own
+  spec) — the PWA manifest/service-worker should still work there (nothing in the implementation is
+  iOS-specific), but "Add to Home Screen" UX and touch-target feel are unverified on that platform.
 - **SLICE 8's own "After Completion" ask, not yet done**: Caroline + son should playtest L1-L20 —
   the son's favorite goal kind (score/collect/jelly) is meant to determine what post-v1 leans into,
   per the spec. Nothing in the level table has had a real human playthrough yet; the bot-winnability

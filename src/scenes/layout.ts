@@ -39,7 +39,21 @@ export const HUD_HEIGHT = 64 * UI_SCALE;
  * grow into it), and gives `LevelMapScene` room for the mascot speech
  * bubble below the last node. */
 export const FOOTER_HEIGHT = 70 * UI_SCALE;
-export const DRAG_THRESHOLD = CELL_SIZE * 0.3;
+/** SLICE 9 touch-comfort pass: small fingers on a phone tend to register as
+ * more drag distance than a mouse for the same intended tap, so touch
+ * devices get a slightly lower drag-swap threshold than desktop's original
+ * 0.3. Detected once at module load (device capability doesn't change
+ * mid-session). Falls back to non-touch outside a browser (Vitest). */
+export const IS_TOUCH_DEVICE =
+  typeof window !== "undefined" && ("ontouchstart" in window || navigator.maxTouchPoints > 0);
+export const DRAG_THRESHOLD = CELL_SIZE * (IS_TOUCH_DEVICE ? 0.22 : 0.3);
+
+/** Apple/Google HIG minimum comfortable touch target, in CSS px — used to
+ * pad out the invisible hit-area of small visual elements (level-map nodes,
+ * corner buttons) without changing their drawn size. Expressed in "design"
+ * units here (matching CELL_SIZE etc.) since UI_SCALE composes automatically
+ * wherever these constants get used. */
+export const MIN_TOUCH_TARGET = 44 * UI_SCALE;
 
 export const BOARD_PIXEL_SIZE = BOARD_COLS * CELL_SIZE;
 export const GAME_WIDTH = Math.min(BOARD_PIXEL_SIZE + BOARD_MARGIN, 380 * UI_SCALE);

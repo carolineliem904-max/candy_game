@@ -5,7 +5,7 @@ import type { LevelDef } from "../logic/LevelDef";
 import { loadProgress } from "../storage/progressStorage";
 import { THEME } from "./theme";
 import { drawSkyBackground } from "./background";
-import { UI_SCALE } from "./layout";
+import { MIN_TOUCH_TARGET, UI_SCALE } from "./layout";
 
 /** All pixel-based constants below are scaled by `UI_SCALE` (see layout.ts)
  * because `this.scale.width`/`height` — used throughout this scene for
@@ -189,8 +189,8 @@ export class LevelMapScene extends Phaser.Scene {
     const hubColor = !unlocked ? LOCKED_COLOR : stars > 0 ? COMPLETED_COLOR : UNLOCKED_COLOR;
 
     // Tire (dark ring) + hub (colored disc) reads as a little wheel.
-    const tire = this.add.circle(x, y, NODE_RADIUS, TIRE_COLOR).setStrokeStyle(2 * UI_SCALE, 0x14161a);
-    const hub = this.add
+    this.add.circle(x, y, NODE_RADIUS, TIRE_COLOR).setStrokeStyle(2 * UI_SCALE, 0x14161a);
+    this.add
       .circle(x, y, NODE_RADIUS - 6 * UI_SCALE, hubColor)
       .setStrokeStyle(2 * UI_SCALE, 0xffffff, unlocked ? 0.9 : 0.4);
 
@@ -229,8 +229,15 @@ export class LevelMapScene extends Phaser.Scene {
         }
         this.scene.start("BoardScene", { levelId });
       };
-      hub.setInteractive({ useHandCursor: true }).on("pointerup", goToLevel);
-      tire.setInteractive({ useHandCursor: true }).on("pointerup", goToLevel);
+      // The wheel's own drawn radius (32px diameter) is well under the
+      // ~44px comfortable-touch-target floor — rather than draw a bigger
+      // wheel, an invisible hit circle carries the actual tap target so the
+      // art stays the same size.
+      const hitRadius = Math.max(NODE_RADIUS, MIN_TOUCH_TARGET / 2);
+      this.add
+        .circle(x, y, hitRadius, 0x000000, 0)
+        .setInteractive({ useHandCursor: true })
+        .on("pointerup", goToLevel);
     }
   }
 }

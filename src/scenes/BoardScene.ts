@@ -8,7 +8,7 @@ import { getLevelById, LEVEL_COUNT } from "../logic/levels";
 import { scoreForStep } from "../logic/ScoreRules";
 import { SoundEngine } from "../audio/SoundEngine";
 import { loadProgress, saveProgress } from "../storage/progressStorage";
-import { BOARD_MARGIN, CELL_PADDING, CELL_SIZE, DRAG_THRESHOLD, HUD_HEIGHT, UI_SCALE } from "./layout";
+import { BOARD_MARGIN, CELL_PADDING, CELL_SIZE, DRAG_THRESHOLD, HUD_HEIGHT, MIN_TOUCH_TARGET, UI_SCALE } from "./layout";
 import { PARTICLE_COLORS, TRAFFIC_LIGHT_ASSET, THEME, VEHICLE_ASSETS, type VehicleAsset } from "./theme";
 import { drawSkyBackground } from "./background";
 import { drawGlossyButton } from "./uiKit";
@@ -99,7 +99,6 @@ export class BoardScene extends Phaser.Scene {
   private scoreTargetText!: Phaser.GameObjects.Text;
   private movesText!: Phaser.GameObjects.Text;
   private muteButton!: Phaser.GameObjects.Text;
-  private mapButton!: Phaser.GameObjects.Text;
   private animating = false;
   private introActive = false;
   private hintTimer: Phaser.Time.TimerEvent | null = null;
@@ -413,13 +412,17 @@ export class BoardScene extends Phaser.Scene {
     const x = this.scale.width - 30 * UI_SCALE;
     const y = 35 * UI_SCALE;
     drawGlossyButton(this, x, y, 38 * UI_SCALE, 38 * UI_SCALE, THEME.hud.chip, THEME.hud.chipStroke).setDepth(14);
-    this.muteButton = this.add
-      .text(x, y, "🔊", { fontSize: px(16) })
-      .setOrigin(0.5)
-      .setDepth(15)
+    this.muteButton = this.add.text(x, y, "🔊", { fontSize: px(16) }).setOrigin(0.5).setDepth(15);
+    // The 38px chip is a hair under the ~44px comfortable-touch-target floor,
+    // and a Text object's own hit area is just its (smaller still) glyph
+    // bounds — so a separate invisible hit rectangle carries the actual tap
+    // target, sized to MIN_TOUCH_TARGET regardless of the visual chip size.
+    const hit = this.add
+      .rectangle(x, y, MIN_TOUCH_TARGET, MIN_TOUCH_TARGET, 0x000000, 0)
+      .setDepth(16)
       .setInteractive({ useHandCursor: true });
 
-    this.muteButton.on("pointerup", () => {
+    hit.on("pointerup", () => {
       const muted = this.soundEngine.toggleMuted();
       this.muteButton.setText(muted ? "🔇" : "🔊");
     });
@@ -429,13 +432,16 @@ export class BoardScene extends Phaser.Scene {
     const x = 30 * UI_SCALE;
     const y = 35 * UI_SCALE;
     drawGlossyButton(this, x, y, 38 * UI_SCALE, 38 * UI_SCALE, THEME.hud.chip, THEME.hud.chipStroke).setDepth(14);
-    this.mapButton = this.add
+    this.add
       .text(x, y, "☰", { fontFamily: "sans-serif", fontSize: px(16), color: THEME.hud.text, fontStyle: "bold" })
       .setOrigin(0.5)
-      .setDepth(15)
+      .setDepth(15);
+    const hit = this.add
+      .rectangle(x, y, MIN_TOUCH_TARGET, MIN_TOUCH_TARGET, 0x000000, 0)
+      .setDepth(16)
       .setInteractive({ useHandCursor: true });
 
-    this.mapButton.on("pointerup", () => this.scene.start("LevelMapScene"));
+    hit.on("pointerup", () => this.scene.start("LevelMapScene"));
   }
 
   private updateHud(): void {
@@ -650,6 +656,12 @@ export class BoardScene extends Phaser.Scene {
   }
 
   private onPointerDown(pointer: Phaser.Input.Pointer): void {
+    // Must run synchronously on the very first real pointerdown, before any
+    // early return, so iOS Safari's user-gesture window for unlocking Web
+    // Audio hasn't already closed by the time a swap's async sequence tries
+    // to actually play a sound (see SoundEngine.unlock's doc comment).
+    this.soundEngine.unlock();
+
     if (this.introActive) {
       return;
     }
@@ -1483,8 +1495,11 @@ export class BoardScene extends Phaser.Scene {
     const primaryLabel = won ? (isFinalLevel ? "Level Map" : "Next Level") : "Try Again";
     const primaryY = panelTop + (won ? 160 : 110) * UI_SCALE;
     const primaryButton = drawGlossyButton(this, centerX, primaryY, 180 * UI_SCALE, 42 * UI_SCALE, THEME.accent.primary, 0xffffff);
+    // Hit rectangle is a touch away from the visual button's own 42px height
+    // (Checkpoint 2's ~44px comfortable-touch-target floor) — invisible, so
+    // the couple extra px of tap tolerance don't change how the button looks.
     const primaryHit = this.add
-      .rectangle(centerX, primaryY, 180 * UI_SCALE, 42 * UI_SCALE, 0x000000, 0)
+      .rectangle(centerX, primaryY, 180 * UI_SCALE, MIN_TOUCH_TARGET, 0x000000, 0)
       .setInteractive({ useHandCursor: true });
     const primaryText = this.add
       .text(centerX, primaryY, primaryLabel, {
@@ -1510,7 +1525,7 @@ export class BoardScene extends Phaser.Scene {
       const secondaryY = primaryY + 54 * UI_SCALE;
       const secondaryButton = drawGlossyButton(this, centerX, secondaryY, 180 * UI_SCALE, 38 * UI_SCALE, 0xffffff, THEME.accent.primary);
       const secondaryHit = this.add
-        .rectangle(centerX, secondaryY, 180 * UI_SCALE, 38 * UI_SCALE, 0x000000, 0)
+        .rectangle(centerX, secondaryY, 180 * UI_SCALE, MIN_TOUCH_TARGET, 0x000000, 0)
         .setInteractive({ useHandCursor: true });
       const secondaryText = this.add
         .text(centerX, secondaryY, "Level Map", {

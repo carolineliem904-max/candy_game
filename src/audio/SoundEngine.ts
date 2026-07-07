@@ -9,6 +9,23 @@ export class SoundEngine {
     return this.muted;
   }
 
+  /** iOS Safari only allows creating/resuming an AudioContext synchronously
+   * within a genuine user-gesture's own call stack — the game's actual sound
+   * calls (e.g. `swap()`) happen a couple of `await`s into an async
+   * animation sequence, which is too late on iOS even though `getContext()`
+   * already calls `resume()` on every use. Callers must invoke this
+   * synchronously from the very first pointerdown handler, before any
+   * `await`. Also starts a near-silent buffer, which some iOS versions
+   * require to fully unlock output (a bare `resume()` isn't always enough). */
+  unlock(): void {
+    const ctx = this.getContext();
+    const buffer = ctx.createBuffer(1, 1, 22050);
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    source.start(0);
+  }
+
   toggleMuted(): boolean {
     this.muted = !this.muted;
     return this.muted;
