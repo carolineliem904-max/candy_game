@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node /private/tmp/claude-501/-Users-carolineliem-Documents-candygame/1d04cf25-1ee4-45bf-b940-a0738730d145/scratchpad/checkpoint0.mjs)",
+      "Bash(node __scratch_checkpoint0.mjs)",
+      "Bash(npx vitest *)",
+      "Bash(cat > *)",
+      "Bash(node __verify8.mjs)",
+      "Bash(node __verify8b.mjs)",
+      "Bash(node __verify8c.mjs)",
+      "Bash(node __verify8d.mjs)",
+      "Bash(node __verify8e.mjs)",
+      "Bash(node __diag.mjs)",
+      "Bash(node __diag2.mjs)",
+      "Bash(python3 -c \"import PIL; print\\(PIL.__version__\\)\")",
+      "Bash(npm view *)",
+      "Bash(node /private/tmp/claude-501/-Users-carolineliem-Documents-candygame/e0135f6f-b50d-4374-811e-76a08e147ddf/scratchpad/verify-checkpoint1.mjs)",
+      "Bash(node verify-checkpoint1.mjs)",
+      "Bash(node verify-checkpoint1-tap.mjs)",
+      "Bash(git -C /Users/carolineliem/Documents/candygame status --short)",
+      "Bash(node verify-checkpoint2.mjs)",
+      "Bash(node verify-audio-unlock.mjs)",
+      "Bash(python3 /private/tmp/claude-501/-Users-carolineliem-Documents-candygame/e0135f6f-b50d-4374-811e-76a08e147ddf/scratchpad/gen_icons.py)",
+      "Bash(xargs -I{} sh -c 'echo {}; grep -m1 version {}')",
+      "Bash(git commit -m ' *)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
+    ]
+  }
+}
